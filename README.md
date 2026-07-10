@@ -13,7 +13,7 @@ A containerized cybersecurity training environment: an attacker platform (Kali) 
 |---|---|
 | Docker images (Kali, Metasploitable) | ✅ Complete, tested |
 | Docker Compose networking | ✅ Complete, tested |
-| Trivy vulnerability scans | ✅ Scans run — findings not yet summarized |
+| Trivy vulnerability scans | ✅ Scans run  |
 | Kubernetes cluster | ✅ Running (Docker Desktop) |
 | Namespace + ResourceQuota automation | ✅ Complete, tested |
 | Network policies (Calico) | ⏳ In progress |
