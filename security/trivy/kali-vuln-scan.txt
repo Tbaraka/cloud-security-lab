@@ -1,0 +1,12 @@
+
+Report Summary
+
+┌─────────────────────────────────────────────────┬────────┬─────────────────┐
+│                     Target                      │  Type  │ Vulnerabilities │
+├─────────────────────────────────────────────────┼────────┼─────────────────┤
+│ cloudsec-lab2-kali:latest (debian kali-rolling) │ debian │        0        │
+└─────────────────────────────────────────────────┴────────┴─────────────────┘
+Legend:
+- '-': Not scanned
+- '0': Clean (no security findings detected)
+

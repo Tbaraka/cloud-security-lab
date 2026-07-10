@@ -1,0 +1,25 @@
+services:
+  kali:
+    build:
+      context: ./dockerfiles/kali
+    hostname: kali
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+    networks:
+      - cyberlab
+
+  metasploitable:
+    build:
+      context: ./dockerfiles/metasploitable
+    hostname: metasploitable
+    restart: unless-stopped
+    networks:
+      - cyberlab
+
+networks:
+  cyberlab:
+    driver: bridge
