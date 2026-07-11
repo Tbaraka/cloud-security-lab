@@ -1,122 +1,321 @@
-# Cloud Security Lab
+# Cloud Security Lab — Progress Report
 
-A containerized cybersecurity training environment: an attacker platform (Kali) and a deliberately weak target (Metasploitable-style Ubuntu), moving toward Kubernetes-based, per-student multi-tenant isolation for a larger classroom deployment.
+> **Project:** Cloud-based cybersecurity training lab (containerized attacker/target environment, moving toward Kubernetes-based multi-tenant isolation)
 
-> **Scope:** Beginner-level lab, single-developer, local environment. Developed and tested on macOS; runnable on Windows via WSL2 (see Prerequisites). Requires Docker Desktop with Kubernetes enabled.
-> For the full build log, testing evidence, and design-decision rationale, see [`docs/progress-report.md`](docs/progress-report.md).
+**Scope:** Beginner-level lab, single-developer, local environment (macOS with Docker Desktop and Kubernetes enabled)
+
+**Current status:** Docker/Compose layer complete and verified. Kubernetes namespace automation and resource quota enforcement complete and verified. Cluster migrated to `kind` with Calico installed; cross-namespace network policy enforcement (default-deny) verified with evidence. Same-namespace allow-rule verification still pending.
+
+*This is a living document — update sections as work progresses rather than appending a new log each time.*
 
 ---
 
-## Current status
+# Table of Contents
 
-| Layer | Status |
+* [1. Environment](#1-environment)
+* [2. Containers Built](#2-containers-built)
+  * [2.1 Kali (Attacker Platform)](#21-kali-attacker-platform)
+  * [2.2 Metasploitable-style Victim](#22-metasploitable-style-victim)
+  * [2.3 Windows Target](#23-windows-target-not-containerized)
+* [3. Docker Networking](#3-docker-networking)
+* [4. Security Scanning](#4-security-scanning)
+* [5. Runtime Isolation](#5-runtime-isolation-gvisor--kata-containers)
+* [6. Kubernetes Namespace Automation](#6-kubernetes-namespace-automation-and-student-isolation)
+* [6b. RBAC](#6b-rbac-per-student-access-control)
+* [7. Kubernetes Network Isolation (Calico)](#7-kubernetes-network-isolation-calico)
+* [8. Remaining Work](#8-remaining-work)
+* [9. Housekeeping](#9-housekeeping)
+* [Overall Progress](#overall-progress)
+
+---
+
+# 1. Environment
+
+| Component | Details |
 |---|---|
-| Docker images (Kali, Metasploitable) | ✅ Complete, tested |
-| Docker Compose networking | ✅ Complete, tested |
-| Trivy vulnerability scans | ✅ Scans run  |
-| Kubernetes cluster | ✅ Running (Docker Desktop) |
-| Namespace + ResourceQuota automation | ✅ Complete, tested |
-| Network policies (Calico) | ⏳ In progress |
-| RBAC | ⏳ Not started |
-| Ingress + WAF | ⏳ Not started |
+| **Host OS** | macOS (Apple Silicon) |
+| **Container Runtime** | Docker Desktop |
+| **Kubernetes** | Docker Desktop built-in cluster (`docker-desktop`) |
+| **Deployment** | Docker Compose (dev/testing) + Kubernetes manifests (orchestration/isolation) |
+| **Current phase** | Docker layer complete; Kubernetes migration in progress |
+
+---
+
+# 2. Containers Built
+
+## 2.1 Kali (Attacker Platform)
+
+**Base image:** `kalilinux/kali-rolling`, **pinned by digest** for reproducibility
+(`sha256:776d57c9d607faafef9957073b0b5a05b0d1115e5728777a8fc5588827cfd249`)
+
+**Installed tools:** nmap, net-tools, iputils-ping, dnsutils, tcpdump, wireshark-common, metasploit-framework, curl, wget, git, python3/pip, sudo, vim, nano
+
+**User configuration:** Non-root `student` account, with **passwordless sudo**. This is intentional, not an oversight — sudo restriction is not part of this container's threat model, because Kali is the attacker platform, not something students are meant to escalate privileges *on*. If a future exercise ever uses Kali as a target instead of an attacker, this decision should be revisited.
+
+**Docker capabilities required:**
+```yaml
+cap_add:
+  - NET_RAW
+  - NET_ADMIN
+```
+Without these, nmap fails with `Operation not permitted` even when run as root inside the container — this is a Docker capability restriction, not a Kali/Linux permission issue. Being root *inside* a container does not grant the underlying kernel capabilities Docker withholds by default.
+
+**Interactive shell:** Compose sets `tty: true` and `stdin_open: true`. Without these, the container's `CMD ["/bin/bash"]` exits immediately on `docker compose up -d` (no terminal attached, bash hits EOF) — the container needs a pseudo-terminal to stay alive for `exec` access.
+
+---
+
+## 2.2 Metasploitable-style Victim
+
+**Base image:** `ubuntu:24.04`, **pinned by digest**
+(`sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90`)
+
+**Installed services:** Apache2, OpenSSH server, vsftpd
+
+**Weak credentials (intentional):** `msfadmin:msfadmin`
+
+**Design scope decision:** This container supports **credential-based attacks** (brute force, default-password exploitation) using current, patched Ubuntu 24.04 packages. It does **not** reproduce the classic Metasploitable2 image's backdoored/vulnerable *service versions* (e.g. vsftpd 2.3.4, which current Ubuntu repos don't provide). This is a deliberate scope boundary: if future exercises require service-version exploits, either the real Metasploitable2 image or a hand-pinned old-package build is a separate, larger task — not something this Dockerfile currently claims to support.
+
+**Service startup:** A custom `entrypoint.sh` starts sshd, apache2, and vsftpd in sequence (containers have no systemd, so services don't start automatically the way they would on a normal Ubuntu install).
+
+Startup was validated more than once, including one run where the container log appeared to stop after Apache with no vsftpd line — this looked like a silent failure caused by `set -e` killing the script mid-sequence. On investigation, this turned out to be a **timing artifact**: `docker logs` was checked before the entrypoint script had finished writing its output, not an actual service failure. Confirmed via `service vsftpd status` and a full, unhurried log read that all three services start reliably. This is noted here because it's a real methodology point: a passing state observed too early can look identical to a failure, and the fix was to add a short delay before checking rather than trusting the first read.
+
+**Verification:** Nmap scan from Kali confirmed exactly the expected ports:
+
+| Port | Service |
+|---|---|
+| 21 | FTP |
+| 22 | SSH |
+| 80 | HTTP |
+
+No unexpected services detected on the default top-1000 port scan.
+
+---
+
+## 2.3 Windows Target (Not Containerized)
+
+Windows was intentionally **not** containerized. Reasons:
+
+- Windows containers require a Windows host (unavailable in this dev environment — macOS/Docker Desktop).
+- Even on a Windows host, Windows containers share the host kernel, which doesn't reproduce what most Windows security exercises actually target (registry behavior, service-control-manager semantics, driver interaction).
+- A minimal Windows Server Core container (smallest available base) has no GUI, browser, or Office — no attack surface for typical introductory exercises (RDP, client-side payloads, SMB/AD attacks), even if it were built successfully.
+
+**Recommended future path:** **KubeVirt** (runs a Windows VM as a native Kubernetes object, fitting the same namespace/RBAC model as the rest of this lab) or a standalone VM outside the cluster.
+
+**Correction during development:** Kata Containers was initially considered as a possible Windows isolation option, but Kata's guest kernel support is **Linux-only** — there is no mainstream Windows guest path. This was caught and corrected; Kata is discussed only in the context of Linux workload isolation (§5), not as a Windows option.
+
+Full reasoning: [`dockerfiles/windows/README.md`](../dockerfiles/windows/README.md).
+
+---
+
+# 3. Docker Networking
+
+A custom bridge network named `cyberlab` was created in `docker-compose.yml`; both containers attach to it.
+
+Validated:
+- Docker's embedded DNS resolves service names correctly (Kali reaches `metasploitable` by name).
+- Nmap scans from Kali against the Metasploitable service succeed.
+
+Hardcoded `container_name` entries were removed from both services — they would block running more than one instance of each container, which conflicts with the eventual goal of per-student isolated environments. (Per-student scaling is being handled via Kubernetes namespaces, not by scaling Compose services — see §6.)
+
+---
+
+# 4. Security Scanning
+
+Both images were scanned with **Trivy**:
+```
+security/trivy/kali-scan.txt (or kali-vuln-scan.txt — filenames need reconciling, see §7)
+security/trivy/metasploitable-vuln-scan.txt
+```
+
+**Two categories of findings, kept distinct in reporting:**
+
+- **Routine CVEs** from base-image package aging — expected, not being "fixed" by patching, since patching could undermine the target's intended fidelity for its purpose.
+- **Intentional lab weaknesses** (e.g. `msfadmin:msfadmin`, exposed FTP/SSH) — these are *not* caught by a CVE scanner, since Trivy scans package vulnerabilities, not credential policy. This distinction matters for the final report: Trivy output alone does not capture "why this lab is exploitable," and both should be presented together, not conflated.
+
+**Open item:** scan output files have not yet been reviewed in detail or summarized — running the scan is done, interpreting it for the report is not.
+
+---
+
+# 5. Runtime Isolation (gVisor / Kata Containers)
+
+Both were evaluated as options for stronger container isolation, specifically motivated by Kali running actual exploitation tooling — an adversarial workload where the isolation boundary matters more than for passive infrastructure (e.g. a monitoring container).
+
+## Kata Containers
+VM-backed isolation (a real lightweight VM per container, not just syscall interception) — the architecturally stronger choice for isolating an attacker container specifically, since it defends against kernel-level exploits, not just typical container escapes.
+
+**Not implemented:** Kata requires nested virtualization support from the host. Docker Desktop on macOS runs everything inside its own Linux VM already, and reliable nested virtualization inside that layer is not a standard supported path — attempting it was judged likely to cost significant time for uncertain payoff at this project's scope.
+
+## gVisor
+Lighter alternative — user-space syscall interception rather than a full VM boundary. Weaker isolation than Kata against kernel-level exploits, but doesn't need nested virtualization, so it looked like the more practical fit for this environment.
+
+**Attempted:**
+```bash
+docker run --rm --runtime=runsc hello-world
+```
+**Result:**
+```
+docker: Error response from daemon: unknown or invalid runtime name: runsc
+```
+gVisor's runtime isn't installed/registered in Docker Desktop's VM, and doing so isn't a standard, well-documented path on macOS the way it is on native Linux Docker hosts.
+
+**Status: deferred, not deployed**, for both. This is a scoped, justified engineering decision given the beginner-lab timeline and host constraints — not an oversight — but it needs to be written up explicitly in `security/gvisor/README.md` and `security/kata/README.md` before final submission, following the same pattern as the Windows decision in §2.3. **This documentation has not yet been written as of this report.**
+
+---
+
+# 6. Kubernetes Namespace Automation and Student Isolation
+
+Docker Desktop's built-in Kubernetes was enabled and confirmed running:
+```bash
+kubectl cluster-info
+```
+returned a healthy control plane (context: `docker-desktop`).
+
+## Namespace provisioning
+Rather than hand-writing per-student YAML files (which doesn't scale to 200 students), a template + script pattern was used:
+
+```
+kubernetes/namespaces/namespace-template.yaml   # Namespace + ResourceQuota, parameterized
+scripts/generate-student-namespace.sh            # takes a student ID, applies the template via envsubst
+```
+
+## Resource quotas
+Every student namespace receives:
+
+| Resource | Value |
+|---|---:|
+| CPU request | 1 CPU |
+| CPU limit | 2 CPUs |
+| Memory request | 1 GiB |
+| Memory limit | 2 GiB |
+| Max pods | 5 |
+
+This prevents one student's workload from starving others on a shared cluster — a real requirement given the brief's "200+ concurrent students" scenario, not just a nice-to-have.
+
+## Validation
+- `student-001` and `student-002` namespaces created successfully, with labels `lab=cloudsec`, `student-id=<id>` — these labels are what the eventual Calico NetworkPolicy will select on, so they were set up now rather than retrofitted later.
+- **ResourceQuota behavior confirmed:** once a namespace has CPU/memory limits set via ResourceQuota, Kubernetes requires every pod in that namespace to explicitly declare `resources.requests` and `resources.limits` — pod creation is otherwise rejected outright. `kubectl run` one-liners can't set these fields, so a full pod manifest (`kubernetes/test-pod.yaml`) was used for testing instead.
+- Test pods deployed successfully into both namespaces using the existing locally-built `cloudsec-lab2-kali` image — Docker Desktop's Kubernetes shares the local Docker image store with Compose builds, so no registry push was needed in this environment. (This may not hold true in other Kubernetes setups, e.g. kind or a cloud cluster — worth remembering if the environment changes later.)
+
+## Key finding: namespaces alone do not provide network isolation
+With no NetworkPolicy applied, a pod in `student-001` successfully pinged a pod in `student-002` across the namespace boundary:
+```
+2 packets transmitted, 2 received, 0% packet loss
+```
+This confirms, with direct evidence rather than assumption, that Kubernetes namespaces are an organizational boundary only. Network isolation requires a `NetworkPolicy` enforced by a compatible CNI (Calico, in this project's case). **This successful cross-namespace ping is being kept as "before" evidence** — the plan is to re-run the identical test after applying `default-deny.yaml` and `allow-student-internal.yaml`, so the report can show a concrete before/after rather than just presenting policy YAML with no proof it does anything.
+
+---
+
+# 6b. RBAC (Per-Student Access Control)
+
+**Objects:** `ServiceAccount`, `Role`, `RoleBinding` per student namespace, templated in `kubernetes/rbac/student-rbac-template.yaml`, applied via `scripts/generate-student-rbac.sh`.
+
+**Role permissions:** get/list/watch/create/update/patch/delete on `pods`, `pods/log`, `pods/exec`, `services`, `configmaps`, and `deployments` — scoped to the student's own namespace only (no ClusterRole, no cross-namespace grants).
+
+**Design decision:** ServiceAccount-based identity was chosen over Kubernetes `User` objects. `User` is not a real, creatable Kubernetes object — it depends on external authentication infrastructure (client certs, OIDC) that this project does not currently implement. ServiceAccounts are real, creatable objects with issuable tokens (`kubectl create token`), making them the practical choice for giving each student an actual usable identity at this project's scope. Token lifetime is currently short (8h via `--duration`); longer-term token issuance/rotation is a known gap, not yet solved.
+
+**Verification methodology note:** the first verification script hardcoded a fixed "other namespace" to test against, which produced a false-positive warning when a student's own namespace happened to match the hardcoded value (a self-check, not a real cross-namespace test). This was caught, understood, and fixed — the corrected script dynamically selects a different labeled student namespace to test against, so the check is meaningful regardless of which student ID is run. This is noted here as a real example of validating test tooling itself, not just the system under test.
+
+**Result, both directions, confirmed via `kubectl auth can-i`:**
+- `student-001`'s ServiceAccount: denied `create pods` in `student-002`
+- `student-002`'s ServiceAccount: denied `create pods` in `student-001`
+
+RBAC-layer (API access) isolation is proven. This is distinct from network-layer isolation (§7) — a ServiceAccount being unable to *administer* another namespace via the Kubernetes API says nothing about whether that student's *pods* can reach another student's pods over the network. Both had to be verified separately.
+
+---
+
+# 7. Kubernetes Network Isolation (Calico)
+
+## Migration to `kind`
+Docker Desktop's built-in Kubernetes was used for initial namespace/quota/RBAC work, but does not support replacing its default networking with Calico, so `NetworkPolicy` objects created there would not have been enforced at all — they'd exist as inert API objects with no actual effect on traffic. This was identified before any policy was written, avoiding a wasted effort building enforcement that couldn't work in that environment.
+
+The cluster was migrated to a dedicated `kind` cluster with the default CNI disabled, and Calico v3.28.0 installed as the networking provider. Confirmed running:
+```
+kube-system   calico-kube-controllers-6c8b7bb7-jmfq7   1/1   Running
+kube-system   calico-node-l6wql                        1/1   Running
+```
+Namespace, ResourceQuota, and RBAC provisioning (§6, §6b) were re-applied on the new cluster using the existing templates/scripts — no changes to those artifacts were needed, confirming the templating approach was portable across clusters.
+
+## Policies implemented
+Two `NetworkPolicy` objects per student namespace:
+
+- **`default-deny-ingress`** — empty `podSelector` (matches all pods), `policyTypes: [Ingress]`, no `ingress` rules defined → denies all inbound traffic to every pod in the namespace by default.
+- **`allow-same-namespace`** — allows ingress `from: - podSelector: {}` with no `namespaceSelector`. This is a specific, easy-to-get-wrong point in Kubernetes NetworkPolicy syntax worth documenting explicitly: a bare `podSelector` with no accompanying `namespaceSelector` only matches pods **within the same namespace as the policy itself** — it does not reach across namespaces. This was verified by reading the applied policy's YAML directly (`kubectl get networkpolicy ... -o yaml`), not assumed from the object's name.
+
+## Verification: cross-namespace traffic (denied)
+Test pods deployed into `student-001` (`kali-test`, IP `10.244.42.79`) and `student-002` (`kali-test-b`, IP `10.244.42.80`). Tested in **both directions**:
+
+```
+kubectl exec -it kali-test -n student-001 -- ping -c 4 10.244.42.80
+4 packets transmitted, 0 received, 100% packet loss
+
+kubectl exec -it kali-test-b -n student-002 -- ping -c 4 10.244.42.79
+4 packets transmitted, 0 received, 100% packet loss
+```
+
+Cross-namespace traffic is confirmed blocked in both directions. This directly contrasts with the pre-policy baseline recorded in §6 (0% packet loss, unrestricted), giving a genuine before/after result rather than a single unverified snapshot.
+
+## Verification: same-namespace traffic (allowed) — **not yet tested**
+The `allow-same-namespace` policy's YAML logic has been reviewed and is believed correct (see above), but has **not yet been tested with a live same-namespace ping**, because a second pod inside `student-001` was not deployed this session. This matters because a default-deny policy that blocks *all* traffic — including traffic that should be allowed within a student's own namespace — would make the lab unusable (a student couldn't reach their own assigned Metasploitable target). Confirming cross-namespace deny alone does not rule this out.
+
+**This is the immediate next verification step**, not yet complete. Plan: deploy a second test pod into `student-001`, ping between the two same-namespace pods, and confirm 0% packet loss before this section can be marked fully verified.
+
+---
+
+# 8. Remaining Work
+
+**Networking**
+- Deploy a second test pod into `student-001` and verify same-namespace traffic is still allowed under the `allow-same-namespace` policy (cross-namespace deny is verified; same-namespace allow is not)
+- Reconcile duplicate/inconsistently-named Trivy scan files in `security/trivy/`
+
+**Security**
+- Write up `security/gvisor/README.md` and `security/kata/README.md` (decision made, not yet documented)
+- Summarize Trivy scan findings for the final report
+- Solve longer-term ServiceAccount token issuance/rotation (current tokens are 8h, manually issued)
+
+**Infrastructure**
+- NGINX Ingress + ModSecurity WAF
+- TLS termination
+- Persistent storage with encryption (note: `local-path-storage` provisioner already present in Docker Desktop's Kubernetes — may reduce setup work here)
+- Automated backups (Velero or equivalent)
+
+**Scaling & monitoring**
+- Horizontal Pod Autoscaler / KEDA
+- Falco (runtime compromise detection — needed before any "automated recovery on compromise" claim has a real mechanism behind it)
+- Prometheus + Grafana
+
+**Deliverables**
+- Security benchmark results (distinct document)
+- Disaster recovery procedures (distinct document)
+- Performance tuning recommendations
+- 8-minute video demonstration
+
+---
+
+# 9. Housekeeping
+
+The Docker environment was cleaned of duplicate images and stray debugging containers accumulated during manual testing (`kali-lab`, `metasploitable-lab`, and a couple of unrelated scratch containers). Before deleting anything, mounts, volumes, and repo file timestamps were checked to confirm no unique data would be lost — nothing was.
+
+`ubuntu:24.04` is intentionally retained as a base image (required by the Metasploitable Dockerfile's `FROM` line), even though no running container currently uses it directly.
+
+---
+
+# Overall Progress
+
+| Component | Status |
+|---|---|
+| Docker images | ✅ Complete |
+| Docker Compose networking | ✅ Complete |
+| Trivy scans run | ✅ Complete |
+| Trivy findings reviewed/summarized | ⏳ Not started |
+| Kubernetes cluster | ✅ Running |
+| Namespace + quota automation | ✅ Complete |
+| Network policies — cross-namespace deny | ✅ Verified (both directions) |
+| Network policies — same-namespace allow | ⏳ Not yet tested |
+| RBAC | ✅ Verified (both directions) |
+| Ingress & WAF | ⏳ Not started |
 | Persistent storage / backup | ⏳ Not started |
+| Disaster recovery | ⏳ Not started |
 | Autoscaling | ⏳ Not started |
 | Monitoring (Falco/Prometheus/Grafana) | ⏳ Not started |
+| gVisor/Kata documentation | ⏳ Not started |
 | Video demonstration | ⏳ Not started |
-
----
-
-## Prerequisites
-
-- Docker Desktop, with **Kubernetes enabled** under Settings → Kubernetes
-- `kubectl`
-- `envsubst` (part of `gettext`)
-- A bash-compatible shell (see platform notes below)
-
-### macOS
-```bash
-brew install gettext
-brew link --force gettext
-```
-Everything below runs in Terminal as-is.
-
-### Windows
-This project's automation (`scripts/*.sh`) is written in bash and depends on `envsubst`, neither of which is available in PowerShell or cmd.exe by default. **Run everything through WSL2** (Windows Subsystem for Linux) rather than a native Windows shell — this lets you follow every command in this README unchanged.
-
-1. Install WSL2 with a Linux distro (Ubuntu recommended):
-   ```powershell
-   wsl --install
-   ```
-2. Enable Docker Desktop's **WSL2 integration**: Docker Desktop → Settings → Resources → WSL Integration → enable it for your distro.
-3. Open your WSL2 distro's terminal (not PowerShell/cmd) and install `envsubst`:
-   ```bash
-   sudo apt update && sudo apt install gettext-base
-   ```
-4. Clone/open this repo **inside the WSL2 filesystem** (e.g. `~/cloud-security-lab`), not on the Windows `C:\` drive mounted through `/mnt/c` — cross-filesystem access between WSL2 and Windows is noticeably slower and occasionally causes permission issues with scripts.
-5. `kubectl` and Docker CLI commands from WSL2 talk to the same Docker Desktop engine automatically — no separate install needed inside WSL2 itself.
-
-From this point on, every command in this README works the same in a WSL2 terminal as it does in macOS Terminal.
-
-**Not tested on native Windows (PowerShell/cmd) without WSL2** — the bash scripts will not run there without modification.
-
----
-
-## Quick start
-
-**1. Build and run the Docker Compose environment (Kali + Metasploitable target):**
-```bash
-docker compose up -d --build
-docker compose ps
-```
-
-**2. Test connectivity from the attacker container:**
-```bash
-docker compose exec kali nmap -sT metasploitable
-```
-Expected: ports 21 (FTP), 22 (SSH), 80 (HTTP) open.
-
-**3. Provision a Kubernetes namespace for a student:**
-```bash
-./scripts/generate-student-namespace.sh 001
-kubectl get namespaces --show-labels
-kubectl get resourcequota -n student-001
-```
-
----
-
-## Repository structure
-
-```
-.
-├── docker-compose.yml
-├── dockerfiles/
-│   ├── kali/                # Attacker platform
-│   ├── metasploitable/      # Vulnerable target
-│   └── windows/             # Not containerized — see README inside
-├── kubernetes/
-│   ├── namespaces/          # Namespace + ResourceQuota template
-│   └── network-policies/    # Calico isolation policies (in progress)
-├── security/
-│   ├── trivy/                # Vulnerability scan results
-│   ├── gvisor/ , kata/       # Runtime isolation — evaluated, deferred
-├── scripts/                  # Automation (namespace generation, etc.)
-└── docs/
-    └── progress-report.md    # Full build log and design rationale
-```
-
----
-
-## Key design decisions
-
-A few choices in this repo are deliberate and documented in detail in the progress report — flagged here so they aren't mistaken for oversights:
-
-- **Windows is not containerized.** See [`dockerfiles/windows/README.md`](dockerfiles/windows/README.md).
-- **The Metasploitable-style target uses current Ubuntu packages, not legacy vulnerable versions.** It supports credential-based attacks (weak `msfadmin:msfadmin` login), not service-version exploits. See progress report §2.2.
-- **Kali's passwordless sudo is intentional** — it's the attacker platform, not a privilege-escalation target.
-- **gVisor and Kata Containers were evaluated for stronger runtime isolation and deferred** — both hit environment limitations on Docker Desktop/macOS. See progress report §5.
-
----
-
-## License
-
-See [LICENSE](LICENSE).
