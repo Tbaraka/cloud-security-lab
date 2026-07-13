@@ -2,7 +2,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: target-metasploitable
-  namespace: student-${STUDENT_ID}
+  namespace: student-${STUDENT_ID}-target
   labels:
     app: target
 spec:

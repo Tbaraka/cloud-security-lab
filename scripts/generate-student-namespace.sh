@@ -17,9 +17,9 @@ NAMESPACE="student-${STUDENT_ID}"
 echo "Applying Pod Security Admission labels..."
 
 kubectl label namespace "$NAMESPACE" \
-    pod-security.kubernetes.io/enforce=restricted \
-    pod-security.kubernetes.io/audit=restricted \
-    pod-security.kubernetes.io/warn=restricted \
+    pod-security.kubernetes.io/enforce=privileged \
+    pod-security.kubernetes.io/audit=privileged \
+    pod-security.kubernetes.io/warn=privileged \
     --overwrite
 
 echo "Namespace $NAMESPACE created and secured."

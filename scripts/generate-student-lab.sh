@@ -10,6 +10,7 @@ provision_student() {
     fi
 
     NAMESPACE="student-${STUDENT_ID}"
+    export STUDENT_ID
 
     echo ""
     echo "=========================================="
@@ -47,8 +48,8 @@ provision_student() {
     kubectl apply -n "$NAMESPACE" \
         -f kubernetes/network-policies/allow-student-internal.yaml
 
-    kubectl apply -n "$NAMESPACE" \
-        -f kubernetes/network-policies/allow-dns-egress.yaml
+    envsubst < kubernetes/network-policies/allow-egress.yaml | \
+        kubectl apply -n "$NAMESPACE" -f -
 
     POLICY_COUNT=$(kubectl get networkpolicy \
         -n "$NAMESPACE" \
@@ -79,7 +80,33 @@ provision_student() {
         return 1
     fi
 
+    envsubst < kubernetes/network-policies/allow-from-student-ns.yaml | \
+        kubectl apply -n "${NAMESPACE}-target" -f -
+
+    TARGET_POLICY_COUNT=$(kubectl get networkpolicy \
+        -n "${NAMESPACE}-target" \
+        --no-headers 2>/dev/null | wc -l | tr -d ' ')
+
+    if [ "$TARGET_POLICY_COUNT" -lt 1 ]; then
+        echo "ERROR: Expected NetworkPolicy in ${NAMESPACE}-target, found $TARGET_POLICY_COUNT"
+        return 1
+    fi
+
     TARGET_STATUS=$(kubectl get pod target-metasploitable \
+        -n "${NAMESPACE}-target" \
+        -o jsonpath='{.status.phase}' 2>/dev/null || echo "Missing")
+
+    ####################################################
+    # Step 6 - Kali Pod
+    ####################################################
+    echo ""
+    echo "=== Step 6: Deploy Kali Pod ==="
+    if ! ./scripts/generate-student-kali.sh "$STUDENT_ID"; then
+        echo "ERROR: kali pod deployment failed for $STUDENT_ID"
+        return 1
+    fi
+
+    KALI_STATUS=$(kubectl get pod kali-attacker \
         -n "$NAMESPACE" \
         -o jsonpath='{.status.phase}' 2>/dev/null || echo "Missing")
 
@@ -107,7 +134,6 @@ provision_student() {
         RBAC_STATUS="ERROR: missing objects"
     fi
 
-    # Real permission check, not just "does the object exist"
     CAN_ACCESS_OWN=$(kubectl auth can-i get pods \
         --as="system:serviceaccount:${NAMESPACE}:student-${STUDENT_ID}" \
         -n "$NAMESPACE" 2>/dev/null)
@@ -140,11 +166,13 @@ provision_student() {
     echo "NetworkPolicies : $POLICY_COUNT"
     echo "TLS Secret      : $TLS_STATUS"
     echo "Target Pod      : $TARGET_STATUS"
+    echo "Target Policy   : $TARGET_POLICY_COUNT"
+    echo "Kali Pod        : $KALI_STATUS"
     echo "=========================================="
 
-    # Return failure if any check actually failed, even though
-    # earlier steps succeeded -- don't let a false "success" print.
-    if [[ "$RBAC_STATUS" == *ERROR* || "$TLS_STATUS" == "Missing" || "$TARGET_STATUS" != "Running" ]]; then
+    if [[ "$RBAC_STATUS" == *ERROR* || "$TLS_STATUS" == "Missing" || \
+          "$TARGET_STATUS" != "Running" || "$TARGET_POLICY_COUNT" -lt 1 || \
+          "$KALI_STATUS" != "Running" ]]; then
         echo "WARNING: Provisioning completed with errors -- see above."
         return 1
     fi
@@ -188,7 +216,6 @@ if [ "$1" = "all" ]; then
     fi
     echo "=========================================="
 
-    # Exit non-zero if anything failed, so CI/automation notices
     if [ ${#FAILED[@]} -gt 0 ]; then
         exit 1
     fi

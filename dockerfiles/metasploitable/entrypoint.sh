@@ -1,7 +1,5 @@
 #!/bin/bash
-
 set -u
-
 echo "Starting Metasploitable Lab..."
 
 start_daemon() {
@@ -13,12 +11,10 @@ start_daemon() {
     fi
 }
 
-start_daemon ssh /usr/sbin/sshd -D
-start_daemon apache2 /usr/sbin/apache2ctl -D FOREGROUND
-start_daemon vsftpd /usr/sbin/vsftpd /etc/vsftpd.conf
+service ssh start
+service apache2 start
+service vsftpd start
 
-echo "Services started (best effort)."
-
+echo "Services started."
 echo "Startup complete."
-
 exec tail -f /dev/null
