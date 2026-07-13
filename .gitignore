@@ -1,0 +1,8 @@
+# Local CA artifacts
+ca/
+.srl
+
+# Local generated secrets and certificates
+*.key
+*.pem
+*.crt

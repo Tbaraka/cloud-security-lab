@@ -17,13 +17,14 @@ spec:
       command: ["sleep", "3600"]
 
       securityContext:
-        allowPrivilegeEscalation: false
+        allowPrivilegeEscalation: true
         runAsNonRoot: true
         runAsUser: 1000
         runAsGroup: 1000
         capabilities:
-          drop:
-            - ALL
+          add:
+           - NET_RAW
+           - NET_ADMIN
 
       resources:
         requests:

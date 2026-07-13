@@ -31,6 +31,22 @@ RUN mkdir -p /home/msfadmin/lab && \
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+# Provide a simple working vsftpd config for the lab container
+RUN printf '%s\n' \
+    'listen=YES' \
+    'listen_ipv6=NO' \
+    'anonymous_enable=NO' \
+    'local_enable=YES' \
+    'write_enable=YES' \
+    'chroot_local_user=YES' \
+    'allow_writeable_chroot=YES' \
+    'secure_chroot_dir=/var/run/vsftpd/empty' \
+    'pam_service_name=vsftpd' \
+    'pasv_enable=YES' \
+    'pasv_min_port=30000' \
+    'pasv_max_port=31000' \
+    > /etc/vsftpd.conf
+
 # Expose vulnerable services
 EXPOSE 21 22 80
 
