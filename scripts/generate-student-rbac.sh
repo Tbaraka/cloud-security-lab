@@ -15,7 +15,8 @@ fi
 
 NAMESPACE="student-${STUDENT_ID}"
 
-if ! kubectl get namespace "$NAMESPACE" &> /dev/null; then
+# Ensure namespace exists
+if ! kubectl get namespace "$NAMESPACE" &>/dev/null; then
     echo "Error: namespace '$NAMESPACE' does not exist."
     echo "Run ./scripts/generate-student-namespace.sh $STUDENT_ID first."
     exit 1
@@ -23,26 +24,39 @@ fi
 
 export STUDENT_ID
 
-envsubst < kubernetes/rbac/student-rbac-template.yaml \
-  | kubectl apply -n "$NAMESPACE" -f -
-
+# Apply ServiceAccount, Role and RoleBinding
+envsubst < kubernetes/rbac/student-rbac-template.yaml | kubectl apply -f -
 echo "RBAC applied for $NAMESPACE."
 
-OTHER_NAMESPACE=$(kubectl get namespaces -l lab=cloudsec -o jsonpath='{.items[*].metadata.name}' \
-  | tr ' ' '\n' | grep -v "^${NAMESPACE}$" | head -n1 || true)
+echo ""
+echo "Verifying permissions..."
+echo -n "Own namespace ($NAMESPACE): "
+kubectl auth can-i create pods \
+    --as=system:serviceaccount:${NAMESPACE}:student-${STUDENT_ID} \
+    -n "$NAMESPACE" || true
+
+# Find another student namespace (if one exists)
+OTHER_NAMESPACE=$(
+    kubectl get ns -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' \
+    | grep '^student-' \
+    | grep -v "^${NAMESPACE}$" \
+    | head -n1 || true
+)
 
 if [ -n "$OTHER_NAMESPACE" ]; then
-  echo ""
-  echo "Cross-namespace permission check (against $OTHER_NAMESPACE):"
-  RESULT=$(kubectl auth can-i create pods \
-    --as=system:serviceaccount:${NAMESPACE}:student-${STUDENT_ID} \
-    -n "$OTHER_NAMESPACE" 2>&1) || true
-  case "$RESULT" in
-    "yes") echo "WARNING: ServiceAccount can access another namespace!" ;;
-    "no")  echo "Confirmed: cross-namespace access denied." ;;
-    *)     echo "ERROR: unexpected result from permission check:"; echo "$RESULT" ;;
-  esac
+    echo -n "Other namespace ($OTHER_NAMESPACE): "
+    kubectl auth can-i create pods \
+        --as=system:serviceaccount:${NAMESPACE}:student-${STUDENT_ID} \
+        -n "$OTHER_NAMESPACE" || true
 else
-  echo ""
-  echo "Only one student namespace exists — skipping cross-namespace check."
+    echo "Only one student namespace exists — skipping cross-namespace check."
 fi
+
+echo ""
+echo "Generating 8-hour access token..."
+kubectl create token "student-${STUDENT_ID}" \
+    -n "$NAMESPACE" \
+    --duration=8h
+
+echo ""
+echo "RBAC provisioning completed successfully."

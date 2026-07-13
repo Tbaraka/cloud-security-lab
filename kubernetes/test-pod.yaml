@@ -3,11 +3,28 @@ kind: Pod
 metadata:
   name: kali-test
 spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+
   containers:
     - name: kali
       image: cloudsec-lab2-kali:latest
       imagePullPolicy: IfNotPresent
       command: ["sleep", "3600"]
+
+      securityContext:
+        allowPrivilegeEscalation: false
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        capabilities:
+          drop:
+            - ALL
+
       resources:
         requests:
           cpu: "250m"
@@ -15,4 +32,5 @@ spec:
         limits:
           cpu: "500m"
           memory: "512Mi"
+
   restartPolicy: Never
