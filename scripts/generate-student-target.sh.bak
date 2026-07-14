@@ -12,6 +12,5 @@ export STUDENT_ID
 envsubst < kubernetes/namespaces/target-namespace-template.yaml | kubectl apply -f -
 envsubst < kubernetes/network-policies/allow-from-student-ns.yaml | kubectl apply -n "student-${STUDENT_ID}-target" -f -
 envsubst < kubernetes/target-pod-template.yaml | kubectl apply -f -
-envsubst < kubernetes/target-service-template.yaml | kubectl apply -f -
 
 echo "Target pod deployed for student-${STUDENT_ID} in student-${STUDENT_ID}-target"
