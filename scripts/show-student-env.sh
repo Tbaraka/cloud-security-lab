@@ -1,0 +1,67 @@
+#!/bin/bash
+set -uo pipefail
+
+if [ $# -ne 1 ]; then
+    echo "Usage: $0 <student-id>"
+    exit 1
+fi
+
+STUDENT_ID=$1
+if ! [[ "$STUDENT_ID" =~ ^[0-9]{3}$ ]]; then
+    echo "Error: student-id must be a 3-digit number (e.g. 001)"
+    exit 1
+fi
+
+NAMESPACE="student-${STUDENT_ID}"
+TARGET_NAMESPACE="student-${STUDENT_ID}-target"
+
+echo "=========================================="
+echo " Student Environment Report: $STUDENT_ID"
+echo "=========================================="
+
+echo ""
+echo "--- Namespaces ---"
+kubectl get ns "$NAMESPACE" 2>&1
+kubectl get ns "$TARGET_NAMESPACE" 2>&1
+
+echo ""
+echo "--- Pod Security Admission labels ---"
+kubectl get namespace "$NAMESPACE" -o jsonpath='{.metadata.labels}' 2>/dev/null
+echo ""
+kubectl get namespace "$TARGET_NAMESPACE" -o jsonpath='{.metadata.labels}' 2>/dev/null
+echo ""
+
+echo ""
+echo "--- RBAC (student namespace) ---"
+kubectl get serviceaccount,role,rolebinding -n "$NAMESPACE" 2>&1
+
+echo ""
+echo "--- NetworkPolicies (student namespace) ---"
+kubectl get networkpolicy -n "$NAMESPACE" 2>&1
+
+echo ""
+echo "--- NetworkPolicies (target namespace) ---"
+kubectl get networkpolicy -n "$TARGET_NAMESPACE" 2>&1
+
+echo ""
+echo "--- Pods (student namespace: Kali) ---"
+kubectl get pods -n "$NAMESPACE" -o wide 2>&1
+
+echo ""
+echo "--- Pods + Service (target namespace: Metasploitable) ---"
+kubectl get pods,svc -n "$TARGET_NAMESPACE" -o wide 2>&1
+
+echo ""
+echo "--- Persistent storage ---"
+kubectl get pvc -n "$NAMESPACE" 2>&1
+
+echo ""
+echo "--- TLS secret ---"
+kubectl get secret "student-${STUDENT_ID}-tls" -n "$TARGET_NAMESPACE" 2>&1
+
+echo ""
+echo "--- Ingress ---"
+kubectl get ingress -n "$TARGET_NAMESPACE" -o wide 2>&1
+
+echo ""
+echo "=========================================="

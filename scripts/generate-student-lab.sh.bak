@@ -134,7 +134,7 @@ spec:
 PVCEOF
 
     PVC_STATUS=$(kubectl get pvc "student-${STUDENT_ID}-work" \
-        -n "$NAMESPACE" \
+        -n "${NAMESPACE}-target" \
         -o jsonpath='{.status.phase}' 2>/dev/null || echo "Missing")
 
     ####################################################

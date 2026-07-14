@@ -22,3 +22,10 @@ spec:
     securityContext:
       capabilities:
         add: ["NET_RAW", "NET_ADMIN"]
+    volumeMounts:
+    - name: workspace
+      mountPath: /home/kali/workspace
+  volumes:
+  - name: workspace
+    persistentVolumeClaim:
+      claimName: student-${STUDENT_ID}-work
