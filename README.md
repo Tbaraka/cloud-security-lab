@@ -3,7 +3,6 @@
 A containerized cybersecurity training environment: an attacker platform (Kali) and a deliberately weak target (Metasploitable-style Ubuntu), moving toward Kubernetes-based, per-student multi-tenant isolation for a larger classroom deployment.
 
 > **Scope:** Beginner-level lab, multi-developer, local environment. Developed and tested on Windows + WSL2 (also runnable on macOS). Uses Docker Desktop for images and **Kind** (cluster `dev`) for Kubernetes — not Docker Desktop’s built-in Kubernetes.
-> For the full build log, testing evidence, and design-decision rationale, see [`docs/progress-report.md`](docs/progress-report.md).
 
 ---
 
@@ -23,7 +22,7 @@ A containerized cybersecurity training environment: an attacker platform (Kali) 
 | Autoscaling | ✅ Complete (HPA 1→3 + soft anti-affinity) |
 | Monitoring (Falco) | ✅ Complete, tested |
 | Monitoring (Prometheus/Grafana) | ⏳ Optional / not required |
-| Video demonstration | ⏳ Script ready (`docs/video-script.md`); recording pending |
+| Video demonstration | ⏳ Recording pending |
 
 ---
 
@@ -105,19 +104,19 @@ kubectl get resourcequota -n student-001
 │   ├── tls/                 # Lab CA + student certs (keys gitignored)
 │   ├── gvisor/ , kata/ , psp-opa/
 ├── scripts/                  # Namespace, RBAC, TLS, Falco, backup/DR
-└── docs/                     # Progress report, guides, video script
+└── docs/                     # Deployment guides and procedures
 ```
 
 ---
 
 ## Key design decisions
 
-A few choices in this repo are deliberate and documented in detail in the progress report — flagged here so they aren't mistaken for oversights:
+A few choices in this repo are deliberate — flagged here so they aren't mistaken for oversights:
 
 - **Windows is not containerized.** See [`dockerfiles/windows/README.md`](dockerfiles/windows/README.md).
-- **The Metasploitable-style target uses current Ubuntu packages, not legacy vulnerable versions.** It supports credential-based attacks (weak `msfadmin:msfadmin` login), not service-version exploits. See progress report §2.2.
+- **The Metasploitable-style target uses current Ubuntu packages, not legacy vulnerable versions.** It supports credential-based attacks (weak `msfadmin:msfadmin` login), not service-version exploits.
 - **Kali's passwordless sudo is intentional** — it's the attacker platform, not a privilege-escalation target.
-- **gVisor and Kata Containers were evaluated for stronger runtime isolation and deferred** — both hit environment limitations on Docker Desktop/macOS. See progress report §5.
+- **gVisor and Kata Containers were evaluated for stronger runtime isolation and deferred** — both hit environment limitations on Docker Desktop/macOS. See `security/gvisor/` and `security/kata/`.
 
 ---
 
