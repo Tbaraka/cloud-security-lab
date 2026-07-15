@@ -2,7 +2,7 @@
 
 A containerized cybersecurity training environment: an attacker platform (Kali) and a deliberately weak target (Metasploitable-style Ubuntu), moving toward Kubernetes-based, per-student multi-tenant isolation for a larger classroom deployment.
 
-> **Scope:** Beginner-level lab, single-developer, local environment. Developed and tested on macOS; runnable on Windows via WSL2 (see Prerequisites). Requires Docker Desktop with Kubernetes enabled.
+> **Scope:** Beginner-level lab, single-developer, local environment. Developed and tested on Windows + WSL2 (also runnable on macOS). Uses Docker Desktop for images and **Kind** (cluster `dev`) for Kubernetes — not Docker Desktop’s built-in Kubernetes.
 > For the full build log, testing evidence, and design-decision rationale, see [`docs/progress-report.md`](docs/progress-report.md).
 
 ---
@@ -13,23 +13,25 @@ A containerized cybersecurity training environment: an attacker platform (Kali) 
 |---|---|
 | Docker images (Kali, Metasploitable) | ✅ Complete, tested |
 | Docker Compose networking | ✅ Complete, tested |
-| Trivy vulnerability scans | ✅ Scans run  |
-| Kubernetes cluster | ✅ Running (Docker Desktop) |
+| Trivy vulnerability scans | ✅ Scans run |
+| Kubernetes cluster | ✅ Running (Kind + Calico) |
 | Namespace + ResourceQuota automation | ✅ Complete, tested |
-| Network policies (Calico) | ⏳ In progress |
-| RBAC | ⏳ Not started |
-| Ingress + WAF | ⏳ Not started |
-| Persistent storage / backup | ⏳ Not started |
-| Autoscaling | ⏳ Not started |
-| Monitoring (Falco/Prometheus/Grafana) | ⏳ Not started |
-| Video demonstration | ⏳ Not started |
+| Network policies (Calico) | ✅ Complete, tested |
+| RBAC | ✅ Complete, tested |
+| Ingress + WAF | ✅ Complete (NGINX + ModSecurity/OWASP CRS + TLS) |
+| Persistent storage / backup | ✅ Complete (PVC + backup/DR scripts) |
+| Autoscaling | ✅ Complete (HPA 1→3 + soft anti-affinity) |
+| Monitoring (Falco) | ✅ Complete, tested |
+| Monitoring (Prometheus/Grafana) | ⏳ Optional / not required |
+| Video demonstration | ⏳ Script ready (`docs/video-script.md`); recording pending |
 
 ---
 
 ## Prerequisites
 
-- Docker Desktop, with **Kubernetes enabled** under Settings → Kubernetes
-- `kubectl`
+- Docker Desktop (WSL2 backend recommended on Windows)
+- Kind cluster (`kind create cluster` / cluster name `dev`) with Calico
+- `kubectl`, Helm (for Falco)
 - `envsubst` (part of `gettext`)
 - A bash-compatible shell (see platform notes below)
 
@@ -89,19 +91,21 @@ kubectl get resourcequota -n student-001
 ```
 .
 ├── docker-compose.yml
-├── dockerfiles/
-│   ├── kali/                # Attacker platform
-│   ├── metasploitable/      # Vulnerable target
-│   └── windows/             # Not containerized — see README inside
+├── dockerfiles/ / kali/ / metasploitable/   # Images
 ├── kubernetes/
 │   ├── namespaces/          # Namespace + ResourceQuota template
-│   └── network-policies/    # Calico isolation policies (in progress)
+│   ├── network-policies/    # Calico isolation policies
+│   ├── lab/                 # Student Kali/Metasploitable deployments
+│   ├── rbac/                # Student least-privilege Role/Binding
+│   ├── ingress/             # NGINX Ingress + HPA
+│   └── storage/             # PVC + Secret mounts
+├── monitoring/falco/         # Falco values + custom rules
 ├── security/
-│   ├── trivy/                # Vulnerability scan results
-│   ├── gvisor/ , kata/       # Runtime isolation — evaluated, deferred
-├── scripts/                  # Automation (namespace generation, etc.)
-└── docs/
-    └── progress-report.md    # Full build log and design rationale
+│   ├── trivy/               # Vulnerability scan results
+│   ├── tls/                 # Lab CA + student certs (keys gitignored)
+│   ├── gvisor/ , kata/ , psp-opa/
+├── scripts/                  # Namespace, RBAC, TLS, Falco, backup/DR
+└── docs/                     # Progress report, guides, video script
 ```
 
 ---
