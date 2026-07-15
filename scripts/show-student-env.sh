@@ -56,6 +56,16 @@ echo "--- Persistent storage ---"
 kubectl get pvc -n "$NAMESPACE" 2>&1
 
 echo ""
+echo "--- Golden snapshot status ---"
+GOLDEN_MARKER=$(kubectl exec -n "$NAMESPACE" kali-attacker -- cat /home/kali/workspace/.golden-info 2>/dev/null)
+if [ -n "$GOLDEN_MARKER" ]; then
+    echo "Golden snapshot: LOADED"
+    echo "$GOLDEN_MARKER"
+else
+    echo "Golden snapshot: NOT detected (workspace has been modified since golden load, or was never loaded)"
+fi
+
+echo ""
 echo "--- TLS secret ---"
 kubectl get secret "student-${STUDENT_ID}-tls" -n "$TARGET_NAMESPACE" 2>&1
 

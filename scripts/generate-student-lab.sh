@@ -293,3 +293,12 @@ if [ "$1" = "all" ]; then
 else
     provision_student "$1"
 fi
+
+####################################################
+# Ensure the ingress port-forward is running so
+# students/instructor can reach https://student-*.lab.local
+# without a manual step every session.
+####################################################
+echo ""
+echo "=== Ensuring ingress port-forward is running ==="
+./scripts/lab-portforward.sh start

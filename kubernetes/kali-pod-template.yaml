@@ -6,6 +6,8 @@ metadata:
   labels:
     app: kali
 spec:
+  securityContext:
+    fsGroup: 1000
   containers:
   - name: kali
     image: kali-lab:latest
