@@ -1,20 +1,21 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: student-${STUDENT_ID}
+  name: ${STUDENT_ID}
   labels:
     lab: cloudsec
-    student-id: "${STUDENT_ID}"
+    student-id: ${STUDENT_ID}
+    environment: training
 ---
 apiVersion: v1
 kind: ResourceQuota
 metadata:
   name: student-quota
-  namespace: student-${STUDENT_ID}
+  namespace: ${STUDENT_ID}
 spec:
   hard:
     requests.cpu: "1"
-    requests.memory: 1Gi
     limits.cpu: "2"
+    requests.memory: 1Gi
     limits.memory: 2Gi
     pods: "5"

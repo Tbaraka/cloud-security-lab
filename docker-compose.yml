@@ -1,25 +1,24 @@
+version: '3.8'
+
 services:
   kali:
-    build:
-      context: ./dockerfiles/kali
-    hostname: kali
-    cap_add:
-      - NET_RAW
-      - NET_ADMIN
-    stdin_open: true
-    tty: true
-    restart: unless-stopped
+    image: kali-lab:latest
+    container_name: kali-lab
+    privileged: true
+    ports:
+      - "2222:22"
     networks:
-      - cyberlab
+      - sec-lab
 
   metasploitable:
-    build:
-      context: ./dockerfiles/metasploitable
-    hostname: metasploitable
-    restart: unless-stopped
+    image: metasploitable-lab:latest
+    container_name: metasploitable-lab
+    ports:
+      - "2223:22"
+      - "4444:4444"
     networks:
-      - cyberlab
+      - sec-lab
 
 networks:
-  cyberlab:
+  sec-lab:
     driver: bridge

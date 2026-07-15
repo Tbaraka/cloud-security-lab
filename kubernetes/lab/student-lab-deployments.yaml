@@ -1,0 +1,91 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kali-lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kali-lab
+  template:
+    metadata:
+      labels:
+        app: kali-lab
+    spec:
+      containers:
+        - name: kali
+          image: kali-lab:latest
+          imagePullPolicy: Never
+          command: ["sleep", "infinity"]
+          ports:
+            - containerPort: 22
+          securityContext:
+            privileged: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kali-lab
+spec:
+  type: ClusterIP
+  selector:
+    app: kali-lab
+  ports:
+    - port: 22
+      targetPort: 22
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metasploitable-lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: metasploitable-lab
+  template:
+    metadata:
+      labels:
+        app: metasploitable-lab
+    spec:
+      containers:
+        - name: metasploitable
+          image: metasploitable-lab:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 21
+            - containerPort: 22
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: metasploitable-lab
+spec:
+  type: ClusterIP
+  selector:
+    app: metasploitable-lab
+  ports:
+    - name: ftp
+      port: 21
+      targetPort: 21
+    - name: ssh
+      port: 22
+      targetPort: 22
+    - name: http
+      port: 80
+      targetPort: 80

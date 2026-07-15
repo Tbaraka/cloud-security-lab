@@ -8,8 +8,8 @@ if [ $# -ne 1 ]; then
 fi
 
 STUDENT_ID="$1"
-TEMPLATE_DIR="$(cd "$(dirname "$0")/.." && pwd)/kubernetes/namespaces"
-TEMPLATE_FILE="$TEMPLATE_DIR/namespace-template.yaml"
+TEMPLATE_DIR="$(cd "$(dirname "$0")/.." && pwd)/kubernetes/rbac"
+TEMPLATE_FILE="$TEMPLATE_DIR/student-rbac-template.yaml"
 
 if [ ! -f "$TEMPLATE_FILE" ]; then
   echo "Template not found: $TEMPLATE_FILE"
@@ -19,6 +19,5 @@ fi
 export STUDENT_ID
 envsubst < "$TEMPLATE_FILE" | kubectl apply -f -
 
-echo "Namespace $STUDENT_ID ready."
-kubectl get namespace "$STUDENT_ID" --show-labels
-kubectl get resourcequota -n "$STUDENT_ID"
+echo "RBAC provisioned for $STUDENT_ID"
+kubectl get sa,role,rolebinding -n "$STUDENT_ID"

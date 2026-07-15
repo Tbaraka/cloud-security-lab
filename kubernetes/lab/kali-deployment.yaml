@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kali-lab
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kali-lab
+  template:
+    metadata:
+      labels:
+        app: kali-lab
+    spec:
+      containers:
+      - name: kali
+        image: kali-lab:latest
+        ports:
+        - containerPort: 22
+        securityContext:
+          privileged: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kali-lab
+spec:
+  type: NodePort
+  selector:
+    app: kali-lab
+  ports:
+    - port: 22
+      targetPort: 22
+      nodePort: 30022
