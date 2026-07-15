@@ -2,7 +2,7 @@
 
 A containerized cybersecurity training environment: an attacker platform (Kali) and a deliberately weak target (Metasploitable-style Ubuntu), moving toward Kubernetes-based, per-student multi-tenant isolation for a larger classroom deployment.
 
-> **Scope:** Beginner-level lab, single-developer, local environment. Developed and tested on Windows + WSL2 (also runnable on macOS). Uses Docker Desktop for images and **Kind** (cluster `dev`) for Kubernetes — not Docker Desktop’s built-in Kubernetes.
+> **Scope:** Beginner-level lab, multi-developer, local environment. Developed and tested on Windows + WSL2 (also runnable on macOS). Uses Docker Desktop for images and **Kind** (cluster `dev`) for Kubernetes — not Docker Desktop’s built-in Kubernetes.
 > For the full build log, testing evidence, and design-decision rationale, see [`docs/progress-report.md`](docs/progress-report.md).
 
 ---
