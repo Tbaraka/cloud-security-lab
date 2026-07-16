@@ -1,12 +1,13 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 if [ $# -ne 1 ]; then
     echo "Usage: $0 <student-id>"
+    echo "Example: $0 001"
     exit 1
 fi
 
-STUDENT_ID=$1
+STUDENT_ID="$1"
 
 if ! [[ "$STUDENT_ID" =~ ^[0-9]{3}$ ]]; then
     echo "Error: student-id must be a 3-digit number (e.g. 001)"
@@ -14,6 +15,13 @@ if ! [[ "$STUDENT_ID" =~ ^[0-9]{3}$ ]]; then
 fi
 
 NAMESPACE="student-${STUDENT_ID}"
+TEMPLATE_DIR="$(cd "$(dirname "$0")/.." && pwd)/kubernetes/rbac"
+TEMPLATE_FILE="$TEMPLATE_DIR/student-rbac-template.yaml"
+
+if [ ! -f "$TEMPLATE_FILE" ]; then
+    echo "Template not found: $TEMPLATE_FILE"
+    exit 1
+fi
 
 # Ensure namespace exists
 if ! kubectl get namespace "$NAMESPACE" &>/dev/null; then
@@ -25,7 +33,7 @@ fi
 export STUDENT_ID
 
 # Apply ServiceAccount, Role and RoleBinding
-envsubst < kubernetes/rbac/student-rbac-template.yaml | kubectl apply -f -
+envsubst < "$TEMPLATE_FILE" | kubectl apply -f -
 echo "RBAC applied for $NAMESPACE."
 
 echo ""

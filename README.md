@@ -1,9 +1,12 @@
 # Cloud Security Lab
 
-A containerized cybersecurity training environment: an attacker platform (Kali) and a deliberately weak target (Metasploitable-style Ubuntu), running Kubernetes-based, per-student multi-tenant isolation for a larger classroom deployment.
+A containerized cybersecurity training environment featuring an attacker platform (Kali Linux) and a deliberately weak target (Metasploitable-style Ubuntu), running Kubernetes-based, per-student multi-tenant isolation for classroom cybersecurity training.
 
-> **Scope:** Beginner-level lab, single-developer, local environment. Developed and tested on macOS; runnable on Windows via WSL2 (see Prerequisites). Requires Docker Desktop and a `kind` Kubernetes cluster (Docker Desktop's built-in Kubernetes does not support the Calico CNI this project needs — see [`docs/full-run-through.md`](docs/full-run-through.md)).
-> For the full build log and design-decision rationale, see [`docs/progress-report.md`](docs/progress-report.md). For the complete first-to-end command sequence, see [`docs/full-run-through.md`](docs/full-run-through.md).
+> **Scope:** Beginner-level lab, **multi-developer**, local environment. Developed and tested on macOS and Windows (WSL2). Uses Docker Desktop and a `kind` Kubernetes cluster with Calico CNI (Docker Desktop's built-in Kubernetes is not supported).
+>
+> For the complete build log and design rationale, see [`docs/progress-report.md`](docs/progress-report.md).
+>
+> For the complete deployment walkthrough, see [`docs/full-run-through.md`](docs/full-run-through.md).
 
 ---
 
@@ -21,90 +24,131 @@ A containerized cybersecurity training environment: an attacker platform (Kali) 
 | Network policies (Calico) — cross-namespace deny | ✅ Complete, tested |
 | Network policies (Calico) — same-namespace allow | ⏳ Logic reviewed, not live-tested |
 | Automated student provisioning (`generate-student-lab.sh`) | ✅ Complete, tested end-to-end (RBAC, TLS, storage, target, Kali, Ingress) |
-| Ingress + WAF (ModSecurity, detection-only) | ✅ Complete, tested (community ingress-nginx used deliberately despite March 2026 retirement — see docs) |
-| TLS termination | ✅ Complete, tested (self-signed lab CA, wildcard cert) |
+| Ingress + WAF (ModSecurity, detection-only) | ✅ Complete, tested |
+| TLS termination | ✅ Complete, tested |
 | Encrypted persistent storage (LUKS) | ✅ Complete, tested |
-| Automated backup | ✅ Complete, tested — backups currently on same disk as source (3-2-1 gap, open) |
-| Snapshot management (on-demand create/restore) | ✅ Complete, tested (real round-trip verified) |
-| Golden snapshot / quick clean-environment deploy | ✅ Complete, tested |
-| Compromise detection (Falco) | ⚠️ Partial — installed, custom rules loaded; outbound-connection rule verified working, container-breakout rule confirmed broken (unresolved) |
-| Automated recovery triggered by Falco alerts | ⏳ Not started — detection exists, no automatic action wired yet |
-| Autoscaling / pod anti-affinity | ⏳ Scoping decision pending — cluster is currently single-node, which limits both features meaningfully (see docs) |
+| Automated backup | ✅ Complete, tested (3-2-1 backup strategy still pending) |
+| Snapshot management | ✅ Complete, tested |
+| Golden snapshot deployment | ✅ Complete, tested |
+| Compromise detection (Falco) | ⚠️ Partial — custom rules installed; container-breakout rule still unresolved |
+| Automated recovery | ⏳ Not started |
+| Autoscaling / pod anti-affinity | ⏳ Pending (limited by single-node cluster) |
 | Monitoring (Prometheus/Grafana) | ⏳ Not started |
 | Video demonstration | ⏳ Not started |
-
-For the exact commands to run this project start to finish, see [`docs/full-run-through.md`](docs/full-run-through.md).
 
 ---
 
 ## Prerequisites
 
-- Docker Desktop, with **Kubernetes enabled** under Settings → Kubernetes
-- `kubectl`, `helm`, `envsubst` (part of `gettext`)
-- A bash-compatible shell (see platform notes below)
+- Docker Desktop
+- `kind`
+- `kubectl`
+- `helm`
+- `envsubst` (part of `gettext`)
+- A bash-compatible shell
 
 ### macOS
+
 ```bash
 brew install gettext helm
 brew link --force gettext
 ```
 
 ### Windows
-Run everything through **WSL2** — this project's scripts are bash-based and depend on `envsubst`, unavailable in PowerShell/cmd by default.
+
+Run everything through **WSL2**.
+
 ```powershell
 wsl --install
 ```
+
 Then inside WSL2:
+
 ```bash
-sudo apt update && sudo apt install gettext-base
+sudo apt update
+sudo apt install gettext-base
 ```
-Enable Docker Desktop's WSL2 integration (Settings → Resources → WSL Integration), and clone this repo inside the WSL2 filesystem, not `/mnt/c`.
+
+Enable Docker Desktop's WSL2 integration and clone this repository inside the WSL2 filesystem rather than `/mnt/c`.
 
 ---
 
 ## Quick start
 
-**1. Docker Compose layer:**
+### 1. Build the Docker environment
+
 ```bash
 docker compose up -d --build
 ```
 
-**2. Kubernetes cluster (kind + Calico — Docker Desktop's built-in Kubernetes will not work):**
+### 2. Create the Kubernetes cluster
+
 ```bash
 kind create cluster --name cloudsec-lab --config kind-config.yaml
 kubectl config use-context kind-cloudsec-lab
 kubectl apply -f calico/calico.yaml
 ```
 
-**3. Provision a fully isolated student environment (namespace, RBAC, network policies, TLS, storage, target, Kali, Ingress — one command):**
+### 3. Provision a student environment
+
 ```bash
 chmod +x scripts/*.sh
 ./scripts/generate-student-lab.sh 001
 ```
 
-**4. Deploy a clean starter workspace:**
+### 4. Deploy the golden snapshot
+
 ```bash
 ./scripts/load-golden-snapshot.sh 001
 ```
 
-**5. Check everything at once:**
+### 5. Verify the deployment
+
 ```bash
 ./scripts/show-student-env.sh 001
 ```
 
-Full step-by-step, every stage in order with expected output: **[`docs/full-run-through.md`](docs/full-run-through.md)**.
+For the complete walkthrough, see [`docs/full-run-through.md`](docs/full-run-through.md).
+
+---
+
+## Repository structure
+
+```text
+.
+├── docker-compose.yml
+├── dockerfiles/ / kali/ / metasploitable/
+├── kubernetes/
+│   ├── namespaces/
+│   ├── network-policies/
+│   ├── lab/
+│   ├── rbac/
+│   ├── ingress/
+│   └── storage/
+├── monitoring/falco/
+├── security/
+│   ├── trivy/
+│   ├── tls/
+│   ├── gvisor/
+│   ├── kata/
+│   └── psp-opa/
+├── scripts/
+└── docs/
+```
 
 ---
 
 ## Key design decisions
 
-- **Community `ingress-nginx` used despite its March 2026 retirement.** Deliberate, scoped choice — best-documented ModSecurity/WAF integration, acceptable given this runs in an isolated local cluster, not internet-facing. See `docs/full-run-through.md` §7.
-- **TLS uses a self-signed lab CA, not cert-manager/Let's Encrypt** — no public DNS exists for ACME validation to reach.
-- **Storage encryption is LUKS-based, not CSI VolumeSnapshots** — `local-path-provisioner` has no CSI driver underneath it, so snapshotting is tar-based, not native Kubernetes snapshots.
-- **Windows is not containerized.** See `dockerfiles/windows/README.md`.
-- **Kali's passwordless sudo is intentional** — it's the attacker platform, not a privilege-escalation target.
-- **PSA (Restricted/Baseline) blocks Kali's NET_RAW/NET_ADMIN needs** — resolved by splitting each student into two namespaces (`student-XXX` privileged for Kali, `student-XXX-target` baseline for Metasploitable).
-- **Cluster is single-node** — this is a known, current limitation directly affecting the autoscaling/anti-affinity requirement; a scoping decision is pending rather than silently worked around.
+- Community `ingress-nginx` is used despite its planned retirement because it provides the most mature ModSecurity/WAF integration for this local lab.
+- TLS uses a self-signed lab Certificate Authority rather than cert-manager/Let's Encrypt because the lab has no public DNS.
+- Storage encryption uses LUKS rather than CSI snapshots because `local-path-provisioner` has no CSI snapshot support.
+- Windows is supported through WSL2; native PowerShell/cmd is not supported for the automation scripts.
+- Kali intentionally has passwordless sudo because it represents the attacker workstation.
+- Pod Security Admission restrictions are handled by separating Kali and Metasploitable into different namespaces.
+- The current deployment targets a single-node Kind cluster, limiting autoscaling and anti-affinity.
+- The Metasploitable-style target intentionally uses current Ubuntu packages configured insecurely rather than outdated vulnerable software.
+- gVisor and Kata Containers were evaluated but deferred because of Docker Desktop/macOS limitations.
 
 ---
 

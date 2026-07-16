@@ -1,0 +1,164 @@
+# ── student-lab-1 ──────────────────────────────────────────
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: student-lab-1
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+---
+# Allow DNS for all pods
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: student-lab-1
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+---
+# Kali may connect OUT to Metasploitable
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-kali-to-metasploitable
+  namespace: student-lab-1
+spec:
+  podSelector:
+    matchLabels:
+      app: kali-lab
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: metasploitable-lab
+    ports:
+    - protocol: TCP
+      port: 21
+    - protocol: TCP
+      port: 22
+    - protocol: TCP
+      port: 80
+---
+# Metasploitable may receive FROM Kali only
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-metasploitable-from-kali
+  namespace: student-lab-1
+spec:
+  podSelector:
+    matchLabels:
+      app: metasploitable-lab
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: kali-lab
+    ports:
+    - protocol: TCP
+      port: 21
+    - protocol: TCP
+      port: 22
+    - protocol: TCP
+      port: 80
+
+# ── student-lab-2 (same policies) ──────────────────────────
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: student-lab-2
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: student-lab-2
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-kali-to-metasploitable
+  namespace: student-lab-2
+spec:
+  podSelector:
+    matchLabels:
+      app: kali-lab
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: metasploitable-lab
+    ports:
+    - protocol: TCP
+      port: 21
+    - protocol: TCP
+      port: 22
+    - protocol: TCP
+      port: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-metasploitable-from-kali
+  namespace: student-lab-2
+spec:
+  podSelector:
+    matchLabels:
+      app: metasploitable-lab
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: kali-lab
+    ports:
+    - protocol: TCP
+      port: 21
+    - protocol: TCP
+      port: 22
+    - protocol: TCP
+      port: 80
