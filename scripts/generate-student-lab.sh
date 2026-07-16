@@ -99,25 +99,15 @@ provision_student() {
     fi
 
     ####################################################
-    # Step 6 - Kali Pod
+    # Step 6 - Persistent storage (encrypted, via
+    # patched local-path-provisioner). Moved before Kali:
+    # the Kali pod spec mounts this PVC as a volume, so it
+    # must exist first or the pod fails scheduling
+    # ("persistentvolumeclaim ... not found") until the
+    # scheduler happens to retry after the PVC shows up.
     ####################################################
     echo ""
-    echo "=== Step 6: Deploy Kali Pod ==="
-    if ! ./scripts/generate-student-kali.sh "$STUDENT_ID"; then
-        echo "ERROR: kali pod deployment failed for $STUDENT_ID"
-        return 1
-    fi
-
-    KALI_STATUS=$(kubectl get pod kali-attacker \
-        -n "$NAMESPACE" \
-        -o jsonpath='{.status.phase}' 2>/dev/null || echo "Missing")
-
-    ####################################################
-    # Step 7 - Persistent storage (encrypted, via
-    # patched local-path-provisioner)
-    ####################################################
-    echo ""
-    echo "=== Step 7: Provision Persistent Storage ==="
+    echo "=== Step 6: Provision Persistent Storage ==="
     cat <<PVCEOF | kubectl apply -f -
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -134,6 +124,20 @@ spec:
 PVCEOF
 
     PVC_STATUS=$(kubectl get pvc "student-${STUDENT_ID}-work" \
+        -n "$NAMESPACE" \
+        -o jsonpath='{.status.phase}' 2>/dev/null || echo "Missing")
+
+    ####################################################
+    # Step 7 - Kali Pod
+    ####################################################
+    echo ""
+    echo "=== Step 7: Deploy Kali Pod ==="
+    if ! ./scripts/generate-student-kali.sh "$STUDENT_ID"; then
+        echo "ERROR: kali pod deployment failed for $STUDENT_ID"
+        return 1
+    fi
+
+    KALI_STATUS=$(kubectl get pod kali-attacker \
         -n "$NAMESPACE" \
         -o jsonpath='{.status.phase}' 2>/dev/null || echo "Missing")
 
@@ -235,8 +239,8 @@ INGEOF
     echo "TLS Secret      : $TLS_STATUS"
     echo "Target Pod      : $TARGET_STATUS"
     echo "Target Policy   : $TARGET_POLICY_COUNT"
-    echo "Kali Pod        : $KALI_STATUS"
     echo "PVC (work dir)  : $PVC_STATUS"
+    echo "Kali Pod        : $KALI_STATUS"
     echo "Ingress         : $INGRESS_STATUS"
     echo "=========================================="
 
