@@ -40,7 +40,7 @@ metadata:
   namespace: student-${STUDENT_ID}
   labels:
     lab: cloudsec
-    student-id: ${STUDENT_ID}
+    student-id: "${STUDENT_ID}"
 subjects:
   - kind: ServiceAccount
     name: student-${STUDENT_ID}
