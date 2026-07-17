@@ -5,6 +5,7 @@ metadata:
   labels:
     lab: cloudsec
     student-id: "${STUDENT_ID}"
+    environment: training
 ---
 apiVersion: v1
 kind: ResourceQuota
@@ -14,7 +15,7 @@ metadata:
 spec:
   hard:
     requests.cpu: "1"
-    requests.memory: 1Gi
     limits.cpu: "2"
+    requests.memory: 1Gi
     limits.memory: 2Gi
     pods: "5"

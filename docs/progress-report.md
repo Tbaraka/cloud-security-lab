@@ -4,7 +4,7 @@
 
 **Scope:** Beginner-level lab, single-developer, local environment (macOS with Docker Desktop and Kubernetes enabled)
 
-**Current status:** Docker/Compose layer complete and verified. Kubernetes namespace automation and resource quota enforcement complete and verified. Network policy enforcement not yet applied.
+**Current status:** Docker/Compose layer complete and verified. Kubernetes namespace automation and resource quota enforcement complete and verified. Cluster migrated to `kind` with Calico installed; cross-namespace network policy enforcement (default-deny) verified with evidence. Same-namespace allow-rule verification still pending.
 
 *This is a living document — update sections as work progresses rather than appending a new log each time.*
 
@@ -21,8 +21,10 @@
 * [4. Security Scanning](#4-security-scanning)
 * [5. Runtime Isolation](#5-runtime-isolation-gvisor--kata-containers)
 * [6. Kubernetes Namespace Automation](#6-kubernetes-namespace-automation-and-student-isolation)
-* [7. Remaining Work](#7-remaining-work)
-* [8. Housekeeping](#8-housekeeping)
+* [6b. RBAC](#6b-rbac-per-student-access-control)
+* [7. Kubernetes Network Isolation (Calico)](#7-kubernetes-network-isolation-calico)
+* [8. Remaining Work](#8-remaining-work)
+* [9. Housekeeping](#9-housekeeping)
 * [Overall Progress](#overall-progress)
 
 ---
@@ -203,17 +205,72 @@ This confirms, with direct evidence rather than assumption, that Kubernetes name
 
 ---
 
-# 7. Remaining Work
+# 6b. RBAC (Per-Student Access Control)
+
+**Objects:** `ServiceAccount`, `Role`, `RoleBinding` per student namespace, templated in `kubernetes/rbac/student-rbac-template.yaml`, applied via `scripts/generate-student-rbac.sh`.
+
+**Role permissions:** get/list/watch/create/update/patch/delete on `pods`, `pods/log`, `pods/exec`, `services`, `configmaps`, and `deployments` — scoped to the student's own namespace only (no ClusterRole, no cross-namespace grants).
+
+**Design decision:** ServiceAccount-based identity was chosen over Kubernetes `User` objects. `User` is not a real, creatable Kubernetes object — it depends on external authentication infrastructure (client certs, OIDC) that this project does not currently implement. ServiceAccounts are real, creatable objects with issuable tokens (`kubectl create token`), making them the practical choice for giving each student an actual usable identity at this project's scope. Token lifetime is currently short (8h via `--duration`); longer-term token issuance/rotation is a known gap, not yet solved.
+
+**Verification methodology note:** the first verification script hardcoded a fixed "other namespace" to test against, which produced a false-positive warning when a student's own namespace happened to match the hardcoded value (a self-check, not a real cross-namespace test). This was caught, understood, and fixed — the corrected script dynamically selects a different labeled student namespace to test against, so the check is meaningful regardless of which student ID is run. This is noted here as a real example of validating test tooling itself, not just the system under test.
+
+**Result, both directions, confirmed via `kubectl auth can-i`:**
+- `student-001`'s ServiceAccount: denied `create pods` in `student-002`
+- `student-002`'s ServiceAccount: denied `create pods` in `student-001`
+
+RBAC-layer (API access) isolation is proven. This is distinct from network-layer isolation (§7) — a ServiceAccount being unable to *administer* another namespace via the Kubernetes API says nothing about whether that student's *pods* can reach another student's pods over the network. Both had to be verified separately.
+
+---
+
+# 7. Kubernetes Network Isolation (Calico)
+
+## Migration to `kind`
+Docker Desktop's built-in Kubernetes was used for initial namespace/quota/RBAC work, but does not support replacing its default networking with Calico, so `NetworkPolicy` objects created there would not have been enforced at all — they'd exist as inert API objects with no actual effect on traffic. This was identified before any policy was written, avoiding a wasted effort building enforcement that couldn't work in that environment.
+
+The cluster was migrated to a dedicated `kind` cluster with the default CNI disabled, and Calico v3.28.0 installed as the networking provider. Confirmed running:
+```
+kube-system   calico-kube-controllers-6c8b7bb7-jmfq7   1/1   Running
+kube-system   calico-node-l6wql                        1/1   Running
+```
+Namespace, ResourceQuota, and RBAC provisioning (§6, §6b) were re-applied on the new cluster using the existing templates/scripts — no changes to those artifacts were needed, confirming the templating approach was portable across clusters.
+
+## Policies implemented
+Two `NetworkPolicy` objects per student namespace:
+
+- **`default-deny-ingress`** — empty `podSelector` (matches all pods), `policyTypes: [Ingress]`, no `ingress` rules defined → denies all inbound traffic to every pod in the namespace by default.
+- **`allow-same-namespace`** — allows ingress `from: - podSelector: {}` with no `namespaceSelector`. This is a specific, easy-to-get-wrong point in Kubernetes NetworkPolicy syntax worth documenting explicitly: a bare `podSelector` with no accompanying `namespaceSelector` only matches pods **within the same namespace as the policy itself** — it does not reach across namespaces. This was verified by reading the applied policy's YAML directly (`kubectl get networkpolicy ... -o yaml`), not assumed from the object's name.
+
+## Verification: cross-namespace traffic (denied)
+Test pods deployed into `student-001` (`kali-test`, IP `10.244.42.79`) and `student-002` (`kali-test-b`, IP `10.244.42.80`). Tested in **both directions**:
+
+```
+kubectl exec -it kali-test -n student-001 -- ping -c 4 10.244.42.80
+4 packets transmitted, 0 received, 100% packet loss
+
+kubectl exec -it kali-test-b -n student-002 -- ping -c 4 10.244.42.79
+4 packets transmitted, 0 received, 100% packet loss
+```
+
+Cross-namespace traffic is confirmed blocked in both directions. This directly contrasts with the pre-policy baseline recorded in §6 (0% packet loss, unrestricted), giving a genuine before/after result rather than a single unverified snapshot.
+
+## Verification: same-namespace traffic (allowed) — **not yet tested**
+The `allow-same-namespace` policy's YAML logic has been reviewed and is believed correct (see above), but has **not yet been tested with a live same-namespace ping**, because a second pod inside `student-001` was not deployed this session. This matters because a default-deny policy that blocks *all* traffic — including traffic that should be allowed within a student's own namespace — would make the lab unusable (a student couldn't reach their own assigned Metasploitable target). Confirming cross-namespace deny alone does not rule this out.
+
+**This is the immediate next verification step**, not yet complete. Plan: deploy a second test pod into `student-001`, ping between the two same-namespace pods, and confirm 0% packet loss before this section can be marked fully verified.
+
+---
+
+# 8. Remaining Work
 
 **Networking**
-- Review and apply `kubernetes/network-policies/default-deny.yaml` and `allow-student-internal.yaml`
-- Re-run the cross-namespace ping test to confirm traffic is now blocked
+- Deploy a second test pod into `student-001` and verify same-namespace traffic is still allowed under the `allow-same-namespace` policy (cross-namespace deny is verified; same-namespace allow is not)
 - Reconcile duplicate/inconsistently-named Trivy scan files in `security/trivy/`
 
 **Security**
 - Write up `security/gvisor/README.md` and `security/kata/README.md` (decision made, not yet documented)
-- Implement RBAC (Role/RoleBinding per student namespace)
 - Summarize Trivy scan findings for the final report
+- Solve longer-term ServiceAccount token issuance/rotation (current tokens are 8h, manually issued)
 
 **Infrastructure**
 - NGINX Ingress + ModSecurity WAF
@@ -234,7 +291,7 @@ This confirms, with direct evidence rather than assumption, that Kubernetes name
 
 ---
 
-# 8. Housekeeping
+# 9. Housekeeping
 
 The Docker environment was cleaned of duplicate images and stray debugging containers accumulated during manual testing (`kali-lab`, `metasploitable-lab`, and a couple of unrelated scratch containers). Before deleting anything, mounts, volumes, and repo file timestamps were checked to confirm no unique data would be lost — nothing was.
 
@@ -252,8 +309,9 @@ The Docker environment was cleaned of duplicate images and stray debugging conta
 | Trivy findings reviewed/summarized | ⏳ Not started |
 | Kubernetes cluster | ✅ Running |
 | Namespace + quota automation | ✅ Complete |
-| Network policies | ⏳ In progress |
-| RBAC | ⏳ Not started |
+| Network policies — cross-namespace deny | ✅ Verified (both directions) |
+| Network policies — same-namespace allow | ⏳ Not yet tested |
+| RBAC | ✅ Verified (both directions) |
 | Ingress & WAF | ⏳ Not started |
 | Persistent storage / backup | ⏳ Not started |
 | Disaster recovery | ⏳ Not started |

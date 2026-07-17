@@ -1,0 +1,15 @@
+security/tls/ca/*.key
+security/tls/ca/*.srl
+security/tls/students/**/*.key
+backups/
+*.pem
+.DS_Store
+
+# Local CA artifacts
+ca/
+.srl
+
+# Local generated secrets and certificates
+*.key
+*.pem
+*.crt

@@ -1,19 +1,20 @@
 #!/bin/bash
-
-set -e
-
+set -u
 echo "Starting Metasploitable Lab..."
 
-# Start SSH
+start_daemon() {
+    local command_name="$1"
+    shift
+    echo "Starting ${command_name}..."
+    if ! "$@"; then
+        echo "${command_name} failed to start; continuing"
+    fi
+}
+
 service ssh start
-
-# Start Apache
 service apache2 start
-
-# Start FTP
 service vsftpd start
 
-echo "Services started successfully."
-
-# Keep container alive
-tail -f /dev/null
+echo "Services started."
+echo "Startup complete."
+exec tail -f /dev/null
