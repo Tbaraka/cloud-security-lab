@@ -1,4 +1,4 @@
-,#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 CloudSec Lab Console — read-only live dashboard for the cloudsec-lab kind cluster.
 

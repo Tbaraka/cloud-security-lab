@@ -1,7 +1,5 @@
 FROM kalilinux/kali-rolling
-
 ENV DEBIAN_FRONTEND=noninteractive
-
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         nmap \
@@ -19,13 +17,10 @@ RUN apt-get update && \
         sudo && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
-
-RUN useradd -m -s /bin/bash student && \
+RUN groupadd -g 1000 student && \
+    useradd -m -s /bin/bash -u 1000 -g 1000 student && \
     groupadd -f wireshark && \
     usermod -aG wireshark student
-
-USER student
-WORKDIR /home/student
+USER 1000:1000
+WORKDIR /home/kali/workspace
 CMD ["tail","-f","/dev/null"]
-
-
