@@ -36,7 +36,7 @@ A containerized cybersecurity training environment featuring an attacker platfor
 | Autoscaling | ✅ Complete, tested — HPA on `ingress-nginx-controller` (the real scalable component; student pods are non-scalable by design), verified scaling 1→2 under real load. Capped at 2 replicas — a hard ceiling from the kind-specific ingress manifest's use of `hostPort` (1 replica per node max), not an arbitrary limit |
 | Pod anti-affinity | ✅ Complete, tested — verified replicas scheduled to separate nodes with the rule active |
 | Monitoring (Prometheus/Grafana) | ⏳ Not started |
-| Video demonstration | ⏳ Not started |
+| Video demonstration | N/A — delivered separately, not part of this repo |
 
 A live, read-only dashboard for presenting cluster state (`cloudsec-dashboard/`) is also available — see [`cloudsec-dashboard/README.md`](cloudsec-dashboard/README.md).
 
