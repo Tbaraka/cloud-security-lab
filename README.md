@@ -35,7 +35,7 @@ A containerized cybersecurity training environment featuring an attacker platfor
 | Automated recovery on compromise | ✅ Complete, tested — CRITICAL Falco alerts auto-trigger `disaster-recovery.sh` via `falco-auto-responder.sh` (dry-run/live modes) |
 | Autoscaling | ✅ Complete, tested — HPA on `ingress-nginx-controller` (the real scalable component; student pods are non-scalable by design), verified scaling 1→2 under real load. Capped at 2 replicas — a hard ceiling from the kind-specific ingress manifest's use of `hostPort` (1 replica per node max), not an arbitrary limit |
 | Pod anti-affinity | ✅ Complete, tested — verified replicas scheduled to separate nodes with the rule active |
-| Monitoring (Prometheus/Grafana) | ⏳ Not started |
+| Monitoring (Prometheus/Grafana) | ⏳ Attempted — kube-prometheus-stack repeatedly destabilized the control plane under real load on this single-Mac Docker Desktop setup (multiple API server timeouts, required a control-plane container restart, a stuck-terminating namespace needing manual finalizer removal); reverted rather than force through a fragile install. A lighter-weight approach (e.g. metrics-server-only, or Grafana without the full Prometheus Operator) is the likely path if pursued further. |
 | Video demonstration | N/A — delivered separately, not part of this repo |
 
 A live, read-only dashboard for presenting cluster state (`cloudsec-dashboard/`) is also available — see [`cloudsec-dashboard/README.md`](cloudsec-dashboard/README.md).
