@@ -1,0 +1,11 @@
+NAME                                                 READY   STATUS      RESTARTS        AGE     IP              NODE                         NOMINATED NODE   READINESS GATES
+calico-kube-controllers-6c8b7bb7-bc9fw               1/1     Running     2 (6m6s ago)    21h     10.244.42.96    cloudsec-lab-control-plane   <none>           <none>
+calico-node-b7q6s                                    1/1     Running     2 (6m6s ago)    21h     172.21.0.4      cloudsec-lab-control-plane   <none>           <none>
+coredns-589f44dc88-2phnn                             1/1     Running     2 (6m6s ago)    21h     10.244.42.119   cloudsec-lab-control-plane   <none>           <none>
+coredns-589f44dc88-lj2jg                             1/1     Running     2 (6m6s ago)    21h     10.244.42.66    cloudsec-lab-control-plane   <none>           <none>
+etcd-cloudsec-lab-control-plane                      1/1     Running     2 (6m6s ago)    21h     172.21.0.4      cloudsec-lab-control-plane   <none>           <none>
+kube-apiserver-cloudsec-lab-control-plane            1/1     Running     2 (6m6s ago)    21h     172.21.0.4      cloudsec-lab-control-plane   <none>           <none>
+kube-controller-manager-cloudsec-lab-control-plane   1/1     Running     19 (6m6s ago)   21h     172.21.0.4      cloudsec-lab-control-plane   <none>           <none>
+kube-proxy-h9gzf                                     1/1     Running     2 (6m6s ago)    21h     172.21.0.4      cloudsec-lab-control-plane   <none>           <none>
+kube-scheduler-cloudsec-lab-control-plane            1/1     Running     19 (6m6s ago)   21h     172.21.0.4      cloudsec-lab-control-plane   <none>           <none>
+student-data-backup-29740440-zcrnq                   0/1     Completed   0               3h56m   <none>          cloudsec-lab-control-plane   <none>           <none>
