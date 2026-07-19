@@ -1,0 +1,100 @@
+==> DR for student-009
+==> Backing up student-009 to /Users/teddybaraka/cloudsec-lab2/backups/student-009-20260719-133542
+Saved /work volume archive (if available)
+Backup complete: /Users/teddybaraka/cloudsec-lab2/backups/student-009-20260719-133542
+To restore: bash ./scripts/disaster-recovery.sh /Users/teddybaraka/cloudsec-lab2/backups/student-009-20260719-133542
+==> Deleting compromised namespace(s)
+namespace "student-009" deleted
+namespace "student-009-target" deleted
+==> Redeploying clean environment via canonical pipeline
+
+==========================================
+Provisioning student-009
+==========================================
+=== Step 1: Create Namespace ===
+namespace/student-009 created
+resourcequota/student-quota created
+Applying Pod Security Admission labels...
+namespace/student-009 labeled
+Namespace student-009 created and secured.
+NAME          STATUS   AGE   LABELS
+student-009   Active   0s    environment=training,kubernetes.io/metadata.name=student-009,lab=cloudsec,pod-security.kubernetes.io/audit=privileged,pod-security.kubernetes.io/enforce=privileged,pod-security.kubernetes.io/warn=privileged,student-id=009
+
+=== Step 2: Configure RBAC ===
+serviceaccount/student-009 created
+role.rbac.authorization.k8s.io/student-role created
+rolebinding.rbac.authorization.k8s.io/student-009-binding created
+RBAC applied for student-009.
+
+Verifying permissions...
+Own namespace (student-009): yes
+Only one student namespace exists — skipping cross-namespace check.
+
+Generating 8-hour access token...
+eyJhbGciOiJSUzI1NiIsImtpZCI6IlZ0STQtMXVYVUZnZmMwNlNpNjNVRG1IQ0g2YVpKN1NKQnlFNml5eXJ1VnMifQ.eyJhdWQiOlsiaHR0cHM6Ly9rdWJlcm5ldGVzLmRlZmF1bHQuc3ZjLmNsdXN0ZXIubG9jYWwiXSwiZXhwIjoxNzg0NDg2MTkyLCJpYXQiOjE3ODQ0NTczOTIsImlzcyI6Imh0dHBzOi8va3ViZXJuZXRlcy5kZWZhdWx0LnN2Yy5jbHVzdGVyLmxvY2FsIiwianRpIjoiNmFlYmRiMjYtOGZkZS00NzQ3LTkzMGEtYTJmYzAzYmJhZjc3Iiwia3ViZXJuZXRlcy5pbyI6eyJuYW1lc3BhY2UiOiJzdHVkZW50LTAwOSIsInNlcnZpY2VhY2NvdW50Ijp7Im5hbWUiOiJzdHVkZW50LTAwOSIsInVpZCI6ImIyZGQwYjhhLTIxMGUtNGNkYS1iOGEzLTczZTFhM2FkZDFiMiJ9fSwibmJmIjoxNzg0NDU3MzkyLCJzdWIiOiJzeXN0ZW06c2VydmljZWFjY291bnQ6c3R1ZGVudC0wMDk6c3R1ZGVudC0wMDkifQ.NdzYHzNXh__AdqqFFHrg8S4dRTxe8z_SVFr8bo8jLWVNt1yxKtfLnLj5S8Ti99R_SlT4z9nGjoHcNBkBLuNrpZKNXOLqyE1OVfzbXQWQh_sB2LlGzq9Re33nYX3gEW_cZAGxAzv0YlQDs3pp0nvEfA_ife0VmJ_I-P68OSZ0ySa90zjlzRG2ds52jYxd2ewH71vvYQjfLBNVp61SA7j1RSA1L9Ev-wFb24v4HCxoshW-HMfiI-ffJGq-Ak1FZ9ln1ogl0vv9FAQsZaHUkG7cTMHnGPhTQlbUSvrTxpCr4-wGffWfebBG3V2o1J1bYzxhK3DeA47dtouQcdUF9FFHug
+RBAC provisioning completed successfully.
+
+=== Step 3: Apply Network Policies ===
+networkpolicy.networking.k8s.io/default-deny-ingress created
+networkpolicy.networking.k8s.io/allow-same-namespace created
+networkpolicy.networking.k8s.io/allow-egress created
+
+=== Step 4: Deploy Target Pod ===
+namespace/student-009-target created
+networkpolicy.networking.k8s.io/allow-from-student-ns created
+pod/target-metasploitable created
+service/metasploitable created
+Target pod deployed for student-009 in student-009-target
+networkpolicy.networking.k8s.io/allow-from-student-ns unchanged
+
+=== Step 5: Generate TLS ===
+secret/student-009-tls created
+TLS secret (wildcard) applied in student-009-target for student-009.lab.local
+
+=== Step 6: Provision Persistent Storage ===
+persistentvolumeclaim/student-009-work created
+
+=== Step 7: Deploy Kali Pod ===
+pod/kali-attacker created
+Kali pod deployed for student-009
+
+=== Step 8: Apply Ingress ===
+ingress.networking.k8s.io/student-009-ingress created
+
+==========================================
+ Student Environment Summary
+==========================================
+Student ID      : 009
+Namespace       : student-009
+ServiceAccount  : student-009
+RBAC            : Objects present / access verified
+Pod Security    : privileged
+NetworkPolicies : 3
+TLS Secret      : Present
+Target Pod      : Pending
+Target Policy   : 1
+PVC (work dir)  : Pending
+Kali Pod        : Pending
+Ingress         : Present
+==========================================
+WARNING: Provisioning completed with errors -- see above.
+
+=== Ensuring ingress port-forward is running ===
+Started, PID 17119
+==> Clean environment ready
+NAME                READY   STATUS    RESTARTS   AGE
+pod/kali-attacker   0/1     Pending   0          3s
+
+NAME                                     STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE
+persistentvolumeclaim/student-009-work   Bound    pvc-b6060a0d-ddf1-4cc7-a364-48e7b9a4938b   500Mi      RWO            standard       <unset>                 3s
+
+NAME                                                   POD-SELECTOR   AGE
+networkpolicy.networking.k8s.io/allow-egress           <none>         4s
+networkpolicy.networking.k8s.io/allow-same-namespace   <none>         4s
+networkpolicy.networking.k8s.io/default-deny-ingress   <none>         4s
+NAME                        READY   STATUS    RESTARTS   AGE
+pod/target-metasploitable   1/1     Running   0          4s
+
+NAME                                                    POD-SELECTOR   AGE
+networkpolicy.networking.k8s.io/allow-from-student-ns   <none>         4s
+DR complete for student-009

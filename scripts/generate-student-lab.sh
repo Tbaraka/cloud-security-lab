@@ -17,18 +17,18 @@ provision_student() {
     echo "Provisioning ${NAMESPACE}"
     echo "=========================================="
 
-    ####################################################
+    # ---------------------------------------------------
     # Step 1 - Namespace
-    ####################################################
+    # ---------------------------------------------------
     echo "=== Step 1: Create Namespace ==="
     if ! ./scripts/generate-student-namespace.sh "$STUDENT_ID"; then
         echo "ERROR: namespace creation failed for $STUDENT_ID"
         return 1
     fi
 
-    ####################################################
+    # ---------------------------------------------------
     # Step 2 - RBAC
-    ####################################################
+    # ---------------------------------------------------
     echo ""
     echo "=== Step 2: Configure RBAC ==="
     if ! ./scripts/generate-student-rbac.sh "$STUDENT_ID"; then
@@ -36,34 +36,28 @@ provision_student() {
         return 1
     fi
 
-    ####################################################
+    # ---------------------------------------------------
     # Step 3 - Network Policies
-    ####################################################
+    # ---------------------------------------------------
     echo ""
     echo "=== Step 3: Apply Network Policies ==="
 
-    kubectl apply -n "$NAMESPACE" \
-        -f kubernetes/network-policies/default-deny.yaml
+    kubectl apply -n "$NAMESPACE" -f kubernetes/network-policies/default-deny.yaml
+    kubectl apply -n "$NAMESPACE" -f kubernetes/network-policies/allow-student-internal.yaml
+    envsubst < kubernetes/network-policies/allow-egress.yaml | kubectl apply -n "$NAMESPACE" -f -
 
-    kubectl apply -n "$NAMESPACE" \
-        -f kubernetes/network-policies/allow-student-internal.yaml
-
-    envsubst < kubernetes/network-policies/allow-egress.yaml | \
-        kubectl apply -n "$NAMESPACE" -f -
-
-    POLICY_COUNT=$(kubectl get networkpolicy \
-        -n "$NAMESPACE" \
-        --no-headers 2>/dev/null | wc -l | tr -d ' ')
+    POLICY_COUNT=$(kubectl get networkpolicy -n "$NAMESPACE" --no-headers 2>/dev/null | wc -l | tr -d ' ')
 
     if [ "$POLICY_COUNT" -lt 3 ]; then
         echo "ERROR: Expected 3 NetworkPolicies in $NAMESPACE, found $POLICY_COUNT"
         return 1
     fi
 
-    ####################################################
-    # Step 4 - Target Pod (moved before TLS: TLS now
-    # depends on the -target namespace existing)
-    ####################################################
+    # ---------------------------------------------------
+    # Step 4 - Target Pod
+    # (moved before TLS: TLS now depends on the -target
+    # namespace existing)
+    # ---------------------------------------------------
     echo ""
     echo "=== Step 4: Deploy Target Pod ==="
     if ! ./scripts/generate-student-target.sh "$STUDENT_ID"; then
@@ -74,23 +68,21 @@ provision_student() {
     envsubst < kubernetes/network-policies/allow-from-student-ns.yaml | \
         kubectl apply -n "${NAMESPACE}-target" -f -
 
-    TARGET_POLICY_COUNT=$(kubectl get networkpolicy \
-        -n "${NAMESPACE}-target" \
-        --no-headers 2>/dev/null | wc -l | tr -d ' ')
+    TARGET_POLICY_COUNT=$(kubectl get networkpolicy -n "${NAMESPACE}-target" --no-headers 2>/dev/null | wc -l | tr -d ' ')
 
     if [ "$TARGET_POLICY_COUNT" -lt 1 ]; then
         echo "ERROR: Expected NetworkPolicy in ${NAMESPACE}-target, found $TARGET_POLICY_COUNT"
         return 1
     fi
 
-    TARGET_STATUS=$(kubectl get pod target-metasploitable \
-        -n "${NAMESPACE}-target" \
+    TARGET_STATUS=$(kubectl get pod target-metasploitable -n "${NAMESPACE}-target" \
         -o jsonpath='{.status.phase}' 2>/dev/null || echo "Missing")
 
-    ####################################################
-    # Step 5 - TLS (wildcard cert, applied in -target ns
-    # since that's where the Ingress will live)
-    ####################################################
+    # ---------------------------------------------------
+    # Step 5 - TLS
+    # (wildcard cert, applied in -target ns since that's
+    # where the Ingress will live)
+    # ---------------------------------------------------
     echo ""
     echo "=== Step 5: Generate TLS ==="
     if ! ./scripts/generate-student-tls.sh "$STUDENT_ID"; then
@@ -98,14 +90,15 @@ provision_student() {
         return 1
     fi
 
-    ####################################################
-    # Step 6 - Persistent storage (encrypted, via
-    # patched local-path-provisioner). Moved before Kali:
-    # the Kali pod spec mounts this PVC as a volume, so it
-    # must exist first or the pod fails scheduling
-    # ("persistentvolumeclaim ... not found") until the
-    # scheduler happens to retry after the PVC shows up.
-    ####################################################
+    # ---------------------------------------------------
+    # Step 6 - Persistent Storage
+    # (encrypted, via patched local-path-provisioner)
+    # Moved before Kali: the Kali pod spec mounts this PVC
+    # as a volume, so it must exist first or the pod fails
+    # scheduling ("persistentvolumeclaim ... not found")
+    # until the scheduler happens to retry after the PVC
+    # shows up.
+    # ---------------------------------------------------
     echo ""
     echo "=== Step 6: Provision Persistent Storage ==="
     cat <<PVCEOF | kubectl apply -f -
@@ -123,13 +116,12 @@ spec:
       storage: 500Mi
 PVCEOF
 
-    PVC_STATUS=$(kubectl get pvc "student-${STUDENT_ID}-work" \
-        -n "$NAMESPACE" \
+    PVC_STATUS=$(kubectl get pvc "student-${STUDENT_ID}-work" -n "$NAMESPACE" \
         -o jsonpath='{.status.phase}' 2>/dev/null || echo "Missing")
 
-    ####################################################
+    # ---------------------------------------------------
     # Step 7 - Kali Pod
-    ####################################################
+    # ---------------------------------------------------
     echo ""
     echo "=== Step 7: Deploy Kali Pod ==="
     if ! ./scripts/generate-student-kali.sh "$STUDENT_ID"; then
@@ -137,13 +129,12 @@ PVCEOF
         return 1
     fi
 
-    KALI_STATUS=$(kubectl get pod kali-attacker \
-        -n "$NAMESPACE" \
+    KALI_STATUS=$(kubectl get pod kali-attacker -n "$NAMESPACE" \
         -o jsonpath='{.status.phase}' 2>/dev/null || echo "Missing")
 
-    ####################################################
+    # ---------------------------------------------------
     # Step 8 - Ingress (TLS + WAF)
-    ####################################################
+    # ---------------------------------------------------
     echo ""
     echo "=== Step 8: Apply Ingress ==="
     cat <<INGEOF | kubectl apply -n "student-${STUDENT_ID}-target" -f -
@@ -176,29 +167,22 @@ INGEOF
 
     INGRESS_EXISTS=$(kubectl get ingress "student-${STUDENT_ID}-ingress" \
         -n "${NAMESPACE}-target" --ignore-not-found)
+
     if [ -n "$INGRESS_EXISTS" ]; then
         INGRESS_STATUS="Present"
     else
         INGRESS_STATUS="Missing"
     fi
 
-    ####################################################
+    # ---------------------------------------------------
     # Verification
-    ####################################################
+    # ---------------------------------------------------
     ACTUAL_PSA=$(kubectl get namespace "$NAMESPACE" \
         -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}')
 
-    SA_EXISTS=$(kubectl get serviceaccount "student-${STUDENT_ID}" \
-        -n "$NAMESPACE" \
-        --ignore-not-found)
-
-    ROLE_EXISTS=$(kubectl get role student-role \
-        -n "$NAMESPACE" \
-        --ignore-not-found)
-
-    ROLEBINDING_EXISTS=$(kubectl get rolebinding "student-${STUDENT_ID}-binding" \
-        -n "$NAMESPACE" \
-        --ignore-not-found)
+    SA_EXISTS=$(kubectl get serviceaccount "student-${STUDENT_ID}" -n "$NAMESPACE" --ignore-not-found)
+    ROLE_EXISTS=$(kubectl get role student-role -n "$NAMESPACE" --ignore-not-found)
+    ROLEBINDING_EXISTS=$(kubectl get rolebinding "student-${STUDENT_ID}-binding" -n "$NAMESPACE" --ignore-not-found)
 
     if [[ -n "$SA_EXISTS" && -n "$ROLE_EXISTS" && -n "$ROLEBINDING_EXISTS" ]]; then
         RBAC_STATUS="Objects present"
@@ -216,16 +200,15 @@ INGEOF
         RBAC_STATUS="${RBAC_STATUS} / ERROR: cannot access own namespace"
     fi
 
-    if kubectl get secret "student-${STUDENT_ID}-tls" \
-        -n "${NAMESPACE}-target" &>/dev/null; then
+    if kubectl get secret "student-${STUDENT_ID}-tls" -n "${NAMESPACE}-target" &>/dev/null; then
         TLS_STATUS="Present"
     else
         TLS_STATUS="Missing"
     fi
 
-    ####################################################
+    # ---------------------------------------------------
     # Summary
-    ####################################################
+    # ---------------------------------------------------
     echo ""
     echo "=========================================="
     echo " Student Environment Summary"
@@ -256,9 +239,9 @@ INGEOF
     return 0
 }
 
-####################################################
+# =========================================================
 # Main
-####################################################
+# =========================================================
 
 if [ $# -ne 1 ]; then
     echo "Usage:"
@@ -298,11 +281,11 @@ else
     provision_student "$1"
 fi
 
-####################################################
+# ---------------------------------------------------
 # Ensure the ingress port-forward is running so
 # students/instructor can reach https://student-*.lab.local
 # without a manual step every session.
-####################################################
+# ---------------------------------------------------
 echo ""
 echo "=== Ensuring ingress port-forward is running ==="
 ./scripts/lab-portforward.sh start

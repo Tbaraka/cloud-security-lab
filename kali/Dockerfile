@@ -8,6 +8,7 @@ RUN apt-get update && \
         dnsutils \
         tcpdump \
         wireshark-common \
+        tshark \
         metasploit-framework \
         curl \
         wget \
@@ -21,6 +22,7 @@ RUN groupadd -g 1000 student && \
     useradd -m -s /bin/bash -u 1000 -g 1000 student && \
     groupadd -f wireshark && \
     usermod -aG wireshark student
+RUN setcap cap_net_raw,cap_net_admin=eip /usr/bin/dumpcap
 USER 1000:1000
 WORKDIR /home/kali/workspace
 CMD ["tail","-f","/dev/null"]
