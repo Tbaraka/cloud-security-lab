@@ -183,11 +183,19 @@ function renderNode(node){
       <div class="bar-track"><div class="bar-fill" style="width:${Math.min(pct,100)}%;background:${color}"></div></div>
     </div>`;
   };
-  wrap.innerHTML =
-    bar('CPU requests', node.cpu_requests_pct) +
-    bar('CPU limits', node.cpu_limits_pct) +
-    bar('Memory requests', node.mem_requests_pct) +
-    bar('Memory limits', node.mem_limits_pct);
+  wrap.innerHTML = (node.nodes || []).map(n => {
+    if (!n.available){
+      return `<div class="node-block"><div class="node-name">${n.name}</div>
+        <div class="empty">unavailable — ${n.reason || 'metrics not readable'}</div></div>`;
+    }
+    return `<div class="node-block">
+      <div class="node-name">${n.name}</div>
+      ${bar('CPU requests', n.cpu_requests_pct)}
+      ${bar('CPU limits', n.cpu_limits_pct)}
+      ${bar('Memory requests', n.mem_requests_pct)}
+      ${bar('Memory limits', n.mem_limits_pct)}
+    </div>`;
+  }).join('');
 }
 
 function renderGrid(students){

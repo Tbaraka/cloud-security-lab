@@ -45,7 +45,7 @@ class KubectlError(Exception):
     pass
 
 
-def run_kubectl(args, timeout=8):
+def run_kubectl(args, timeout=12):
     """The only place this process talks to the cluster. Verb-locked."""
     if not args or args[0] not in ALLOWED_VERBS:
         raise KubectlError(f"refused: '{args[0] if args else ''}' is not a read-only verb")
@@ -189,32 +189,50 @@ def student_raw(sid):
 
 
 def node_allocation():
-    """Best-effort parse of `kubectl describe node`'s Allocated resources table."""
+    """Best-effort parse of `kubectl describe node`'s Allocated resources table, per node."""
     try:
-        raw = run_kubectl(["describe", "node"])
+        names_raw = run_kubectl(["get", "nodes", "-o", "jsonpath={.items[*].metadata.name}"])
     except KubectlError as e:
         return {"available": False, "reason": str(e)}
 
-    cpu_req = cpu_lim = mem_req = mem_lim = None
-    for line in raw.splitlines():
-        line = line.strip()
-        m = re.match(r"^cpu\s+\S+\s*\((\d+)%\)\s+\S+\s*\((\d+)%\)", line)
-        if m:
-            cpu_req, cpu_lim = int(m.group(1)), int(m.group(2))
-        m = re.match(r"^memory\s+\S+\s*\((\d+)%\)\s+\S+\s*\((\d+)%\)", line)
-        if m:
-            mem_req, mem_lim = int(m.group(1)), int(m.group(2))
+    node_names = names_raw.split()
+    if not node_names:
+        return {"available": False, "reason": "no nodes found"}
 
-    if mem_req is None:
-        return {"available": False, "reason": "could not parse 'Allocated resources' section"}
+    nodes = []
+    for name in node_names:
+        try:
+            raw = run_kubectl(["describe", "node", name])
+        except KubectlError as e:
+            nodes.append({"name": name, "available": False, "reason": str(e)})
+            continue
 
-    return {
-        "available": True,
-        "cpu_requests_pct": cpu_req,
-        "cpu_limits_pct": cpu_lim,
-        "mem_requests_pct": mem_req,
-        "mem_limits_pct": mem_lim,
-    }
+        cpu_req = cpu_lim = mem_req = mem_lim = None
+        for line in raw.splitlines():
+            line = line.strip()
+            m = re.match(r"^cpu\s+\S+\s*\((\d+)%\)\s+\S+\s*\((\d+)%\)", line)
+            if m:
+                cpu_req, cpu_lim = int(m.group(1)), int(m.group(2))
+            m = re.match(r"^memory\s+\S+\s*\((\d+)%\)\s+\S+\s*\((\d+)%\)", line)
+            if m:
+                mem_req, mem_lim = int(m.group(1)), int(m.group(2))
+
+        if mem_req is None:
+            nodes.append({
+                "name": name, "available": False,
+                "reason": "could not parse 'Allocated resources' section",
+            })
+        else:
+            nodes.append({
+                "name": name,
+                "available": True,
+                "cpu_requests_pct": cpu_req,
+                "cpu_limits_pct": cpu_lim,
+                "mem_requests_pct": mem_req,
+                "mem_limits_pct": mem_lim,
+            })
+
+    return {"available": True, "nodes": nodes}
 
 
 def build_state():
