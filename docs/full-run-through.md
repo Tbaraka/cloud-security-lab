@@ -440,3 +440,24 @@ rm -rf "$WORKDIR"
 docker exec cloudsec-lab-control-plane ls -la /mnt/encrypted-storage/ | grep student-XXX
 ```
 and `chmod 0777` the specific directory if needed.
+---
+
+## 13. Known gap: storage durability does not survive cluster rebuild (found 2026-07-19)
+
+The LUKS-encrypted volume (`/mnt/encrypted-storage`) and all snapshot files
+(`/mnt/encrypted-storage-snapshots`) live entirely inside the kind node's
+Docker-managed volume — there is no host bind-mount backing them. A
+`kind delete cluster` (needed for any node-config change, e.g. the
+single-node→multi-node rebuild done this session) **permanently destroys
+all of it** unless manually copied off first:
+
+```bash
+docker cp cloudsec-lab-control-plane:/mnt/encrypted-storage-snapshots/. ./_preserved-node-data/encrypted-storage-snapshots/
+docker cp cloudsec-lab-control-plane:/mnt/encrypted-storage/. ./_preserved-node-data/encrypted-storage/
+```
+
+**No script in this repo does this automatically today.** This is a real
+gap in the "automated backup" and "encrypted persistent storage"
+deliverables — encryption-at-rest is genuine, but durability across cluster
+lifecycle events is not, and should not be presented as equivalent to true
+off-node backup.

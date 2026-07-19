@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CloudSec Lab Console</title>
+<style>
+  :root{
+    --bg: #0B0E12;
+    --panel: #12161D;
+    --panel-raised: #171C24;
+    --hairline: #262C36;
+    --text: #E8EAED;
+    --text-dim: #8A93A3;
+    --text-faint: #4E5765;
+    --accent: #E8935B;
+    --good: #57C785;
+    --warn: #F5A623;
+    --bad: #F0524B;
+    --mono: 'SF Mono', 'JetBrains Mono', 'Menlo', 'Consolas', monospace;
+    --sans: -apple-system, 'Inter', 'Segoe UI', sans-serif;
+  }
+  *{ box-sizing: border-box; }
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family: var(--mono);
+    -webkit-font-smoothing: antialiased;
+  }
+  header{
+    display:flex; align-items:center; justify-content:space-between;
+    padding: 18px 28px; border-bottom:1px solid var(--hairline);
+    background: linear-gradient(180deg, var(--panel-raised), var(--panel));
+  }
+  header .title{
+    font-family: var(--sans); font-weight:700; font-size:15px;
+    letter-spacing: 0.08em; text-transform:uppercase; color:var(--text);
+  }
+  header .title span{ color: var(--accent); }
+  .ctx-row{ display:flex; align-items:center; gap:22px; font-size:13px; color:var(--text-dim); }
+  .dot{ width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:7px; }
+  .dot.good{ background:var(--good); box-shadow:0 0 8px var(--good); }
+  .dot.bad{ background:var(--bad); box-shadow:0 0 8px var(--bad); }
+  .pulse{
+    width:7px; height:7px; border-radius:50%; background:var(--accent);
+    display:inline-block; margin-right:8px;
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse{
+    0%,100%{ opacity:1; transform:scale(1); }
+    50%{ opacity:.35; transform:scale(.7); }
+  }
+  main{ padding: 24px 28px 60px; max-width:1180px; margin:0 auto; }
+  .section-label{
+    font-family: var(--sans); font-size:11px; letter-spacing:0.12em;
+    text-transform:uppercase; color:var(--text-faint); margin: 30px 0 12px;
+    display:flex; align-items:center; gap:10px;
+  }
+  .section-label::after{
+    content:''; flex:1; height:1px; background:var(--hairline);
+  }
+  .node-bar-wrap{
+    background:var(--panel); border:1px solid var(--hairline); border-radius:6px;
+    padding:16px 18px; display:grid; grid-template-columns: repeat(2, 1fr); gap:18px;
+  }
+  .bar-item .label{ font-size:11px; color:var(--text-dim); margin-bottom:6px;
+    display:flex; justify-content:space-between; font-family:var(--sans); }
+  .bar-track{ height:6px; background:#1D232C; border-radius:3px; overflow:hidden; }
+  .bar-fill{ height:100%; border-radius:3px; transition: width .4s ease; }
+
+  .panel-grid{
+    display:grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+    gap:12px;
+  }
+  .slot{
+    background:var(--panel); border:1px solid var(--hairline); border-radius:6px;
+    padding:12px; cursor:pointer; transition: border-color .15s, transform .1s;
+  }
+  .slot:hover{ border-color:#3A4250; transform: translateY(-1px); }
+  .slot.selected{ border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset; }
+  .slot .sid{ font-size:13px; font-weight:600; margin-bottom:9px; color:var(--text); }
+  .leds{ display:grid; grid-template-columns: repeat(4,1fr); gap:5px; }
+  .led{ width:100%; aspect-ratio:1; border-radius:2px; background:#1D232C; }
+  .led.good{ background:var(--good); }
+  .led.warn{ background:var(--warn); }
+  .led.bad{ background:var(--bad); }
+
+  .detail{
+    background:var(--panel); border:1px solid var(--hairline); border-radius:6px;
+    padding:18px 20px; margin-top:14px;
+  }
+  .detail-grid{
+    display:grid; grid-template-columns: repeat(auto-fill, minmax(190px,1fr));
+    gap: 10px 20px; font-size:13px; margin-top:10px;
+  }
+  .kv{ display:flex; justify-content:space-between; padding:6px 0;
+    border-bottom:1px dashed var(--hairline); }
+  .kv .k{ color:var(--text-dim); }
+  .kv .v.good{ color:var(--good); }
+  .kv .v.bad{ color:var(--bad); }
+  .kv .v.warn{ color:var(--warn); }
+
+  .terminal{
+    background:#0A0D11; border:1px solid var(--hairline); border-radius:6px;
+    margin-top:16px; overflow:hidden;
+  }
+  .terminal-head{
+    padding:9px 14px; font-family:var(--sans); font-size:11px; letter-spacing:.08em;
+    text-transform:uppercase; color:var(--text-faint); border-bottom:1px solid var(--hairline);
+  }
+  .term-block{ padding:12px 16px; border-bottom:1px solid #171C24; }
+  .term-block:last-child{ border-bottom:none; }
+  .term-cmd{ color:var(--accent); font-size:12.5px; margin-bottom:6px; }
+  .term-cmd::before{ content:'$ '; color:var(--text-faint); }
+  .term-out{ color:var(--text-dim); font-size:12px; white-space:pre-wrap; line-height:1.5; }
+
+  .empty, .error{
+    font-family: var(--sans); color:var(--text-dim); font-size:13px;
+    padding: 40px 0; text-align:center;
+  }
+  .error{ color:var(--bad); }
+  footer{
+    text-align:center; padding:30px; color:var(--text-faint);
+    font-family:var(--sans); font-size:11px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="title">CloudSec Lab <span>Console</span></div>
+  <div class="ctx-row">
+    <span id="ctxBadge"><span class="dot bad"></span>checking context…</span>
+    <span><span class="pulse"></span><span id="lastRefresh">—</span></span>
+  </div>
+</header>
+
+<main>
+  <div class="section-label">Node allocation</div>
+  <div class="node-bar-wrap" id="nodeBars">
+    <div class="empty">Loading…</div>
+  </div>
+
+  <div class="section-label">Student patch panel <span id="activeCount" style="margin-left:4px;"></span></div>
+  <div class="panel-grid" id="panelGrid">
+    <div class="empty">Loading…</div>
+  </div>
+
+  <div id="detailWrap"></div>
+</main>
+
+<footer>Read-only console. Executes <code>kubectl get / describe / auth can-i</code> only. Polling every 5s.</footer>
+
+<script>
+const REQUIRED_CONTEXT = "kind-cloudsec-lab";
+let selected = null;
+let lastState = null;
+
+function led(ok, warnOk) {
+  if (warnOk === undefined) return ok ? 'good' : 'bad';
+  return ok ? 'good' : (warnOk ? 'warn' : 'bad');
+}
+
+function slotLeds(s){
+  const checks = [
+    s.rbac_objects, s.rbac_exec_allowed && s.rbac_configmaps_denied && s.rbac_deployments_denied,
+    s.psa === 'privileged', s.target_pod === 'Running',
+    s.kali_pod === 'Running', s.pvc === 'Bound',
+    s.netpol_count >= 3, s.ingress
+  ];
+  return checks.map(c => `<div class="led ${c ? 'good' : 'bad'}"></div>`).join('');
+}
+
+function renderNode(node){
+  const wrap = document.getElementById('nodeBars');
+  if (!node.available){
+    wrap.innerHTML = `<div class="empty">Node allocation unavailable — ${node.reason || 'metrics not readable'}</div>`;
+    return;
+  }
+  const bar = (label, pct) => {
+    const color = pct > 100 ? 'var(--bad)' : pct > 80 ? 'var(--warn)' : 'var(--good)';
+    return `<div class="bar-item">
+      <div class="label"><span>${label}</span><span>${pct}%</span></div>
+      <div class="bar-track"><div class="bar-fill" style="width:${Math.min(pct,100)}%;background:${color}"></div></div>
+    </div>`;
+  };
+  wrap.innerHTML =
+    bar('CPU requests', node.cpu_requests_pct) +
+    bar('CPU limits', node.cpu_limits_pct) +
+    bar('Memory requests', node.mem_requests_pct) +
+    bar('Memory limits', node.mem_limits_pct);
+}
+
+function renderGrid(students){
+  const grid = document.getElementById('panelGrid');
+  document.getElementById('activeCount').textContent = students.length ? `— ${students.length} active` : '';
+  if (!students.length){
+    grid.innerHTML = `<div class="empty">No student-### namespaces found on this cluster.</div>`;
+    return;
+  }
+  grid.innerHTML = students.map(s => `
+    <div class="slot ${selected===s.id?'selected':''}" data-id="${s.id}">
+      <div class="sid">student-${s.id}</div>
+      <div class="leds">${slotLeds(s)}</div>
+    </div>
+  `).join('');
+  grid.querySelectorAll('.slot').forEach(el => {
+    el.addEventListener('click', () => { selected = el.dataset.id; renderAll(lastState); loadRaw(selected); });
+  });
+}
+
+function kv(label, value, cls){
+  return `<div class="kv"><span class="k">${label}</span><span class="v ${cls||''}">${value}</span></div>`;
+}
+
+function renderDetail(students){
+  const wrap = document.getElementById('detailWrap');
+  const s = students.find(x => x.id === selected);
+  if (!s){ wrap.innerHTML = ''; return; }
+
+  wrap.innerHTML = `
+    <div class="section-label">student-${s.id} detail</div>
+    <div class="detail">
+      <div class="detail-grid">
+        ${kv('RBAC objects', s.rbac_objects ? 'present' : 'missing', led(s.rbac_objects))}
+        ${kv('pods/exec allowed', s.rbac_exec_allowed ? 'yes' : 'no', led(s.rbac_exec_allowed))}
+        ${kv('configmaps denied', s.rbac_configmaps_denied ? 'yes' : 'no (leak!)', led(s.rbac_configmaps_denied))}
+        ${kv('deployments denied', s.rbac_deployments_denied ? 'yes' : 'no (leak!)', led(s.rbac_deployments_denied))}
+        ${kv('Pod Security', s.psa, led(s.psa === 'privileged'))}
+        ${kv('Target pod', s.target_pod, led(s.target_pod === 'Running'))}
+        ${kv('Kali pod', s.kali_pod, led(s.kali_pod === 'Running'))}
+        ${kv('PVC', s.pvc, led(s.pvc === 'Bound'))}
+        ${kv('NetworkPolicies (ns)', s.netpol_count, led(s.netpol_count >= 3))}
+        ${kv('NetworkPolicies (target)', s.target_netpol_count, led(s.target_netpol_count >= 1))}
+        ${kv('Ingress', s.ingress ? 'present' : 'missing', led(s.ingress))}
+        ${kv('TLS secret', s.tls ? 'present' : 'missing', led(s.tls))}
+      </div>
+      <div class="terminal">
+        <div class="terminal-head">live kubectl output — student-${s.id}</div>
+        <div id="termBody"><div class="term-block"><div class="term-out">loading…</div></div></div>
+      </div>
+    </div>
+  `;
+}
+
+async function loadRaw(sid){
+  try{
+    const res = await fetch(`/api/student/${sid}`);
+    const data = await res.json();
+    const body = document.getElementById('termBody');
+    if (!body) return;
+    if (data.error){
+      body.innerHTML = `<div class="term-block"><div class="term-out" style="color:var(--bad)">${data.error}</div></div>`;
+      return;
+    }
+    body.innerHTML = data.raw.map(b => `
+      <div class="term-block">
+        <div class="term-cmd">${b.command}</div>
+        <div class="term-out">${(b.output || '(empty)').replace(/</g,'&lt;')}</div>
+      </div>
+    `).join('');
+  }catch(e){}
+}
+
+function renderAll(state){
+  if (!state) return;
+  lastState = state;
+  const ctxBadge = document.getElementById('ctxBadge');
+  if (state.error){
+    ctxBadge.innerHTML = `<span class="dot bad"></span>${state.error}`;
+    document.getElementById('panelGrid').innerHTML = `<div class="error">${state.error}</div>`;
+    document.getElementById('nodeBars').innerHTML = '';
+    return;
+  }
+  const ok = state.context === REQUIRED_CONTEXT;
+  ctxBadge.innerHTML = `<span class="dot ${ok?'good':'bad'}"></span>context: ${state.context}`;
+  renderNode(state.node);
+  renderGrid(state.students);
+  renderDetail(state.students);
+}
+
+async function poll(){
+  try{
+    const res = await fetch('/api/state');
+    const data = await res.json();
+    renderAll(data);
+    document.getElementById('lastRefresh').textContent = 'refreshed ' + new Date().toLocaleTimeString();
+  }catch(e){
+    document.getElementById('ctxBadge').innerHTML = `<span class="dot bad"></span>server unreachable`;
+  }
+  if (selected) loadRaw(selected);
+}
+
+poll();
+setInterval(poll, 5000);
+</script>
+</body>
+</html>
