@@ -48,4 +48,4 @@ subjects:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: student-role
+  name: student-rolew

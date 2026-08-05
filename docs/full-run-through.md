@@ -6,7 +6,7 @@ This is the complete, ordered sequence to stand up the project from nothing. Eac
 
 ## 0. Prerequisites
 - Docker Desktop running, with Kubernetes support available
-- `kubectl`, `kind`, `envsubst` installed (see main `README.md` for platform-specific setup, including Windows/WSL2 notes)
+- `kubectl`, `kind`, `helm`, `envsubst` installed
 
 ---
 
@@ -28,9 +28,10 @@ docker compose exec kali nmap -sT metasploitable
 ## 2. Vulnerability scans
 
 ```bash
-trivy image --scanners vuln cloudsec-lab2-kali:latest > security/trivy/kali-vuln-scan.txt
-trivy image --scanners vuln cloudsec-lab2-metasploitable:latest > security/trivy/metasploitable-vuln-scan.txt
+trivy image --scanners vuln kali-lab:latest > security/trivy/kali-vuln-scan.txt
+trivy image --scanners vuln metasploitable-lab:latest > security/trivy/metasploitable-vuln-scan.txt
 ```
+No CI pipeline exists — this is a manual step, re-run before each build cycle.
 
 ---
 
@@ -38,125 +39,77 @@ trivy image --scanners vuln cloudsec-lab2-metasploitable:latest > security/trivy
 
 **Docker Desktop's built-in Kubernetes does not support Calico/NetworkPolicy enforcement — a dedicated `kind` cluster is required.**
 
-```bash
-kind create cluster --name cloudsec-lab --config kind-config.yaml
-kubectl cluster-info
-kubectl get nodes
-```
-**Verify:** node status `Ready`.
+Cluster is 2 nodes (1 control-plane, 1 worker) — required for autoscaling and pod anti-affinity to mean anything.
 
 ```bash
+kind create cluster --name cloudsec-lab --config kind/kind-config.yaml
 kubectl config use-context kind-cloudsec-lab
 kubectl config current-context
+kubectl get nodes
 ```
-**Verify:** prints `kind-cloudsec-lab`.
+**Verify:** both nodes `Ready`, context prints `kind-cloudsec-lab`.
 
 ```bash
 kubectl apply -f calico/calico.yaml
 kubectl wait --for=condition=Ready pods --all -n kube-system --timeout=300s
 kubectl get pods -n kube-system | grep calico
 ```
-**Verify:** `calico-node` and `calico-kube-controllers` both `Running`.
+**Verify:** `calico-node` (one per node) and `calico-kube-controllers` all `Running`.
 
 ---
 
 ## 4. Provision a student environment
 
-One command runs all three stages (namespace, RBAC, network policies):
-
 ```bash
-chmod +x scripts/generate-student-namespace.sh scripts/generate-student-rbac.sh scripts/generate-student-lab.sh
-
-./scripts/generate-student-lab.sh 001
+chmod +x scripts/*.sh
+bash scripts/generate-student-lab.sh 009
 echo "EXIT CODE: $?"
 ```
+Single orchestrator — runs namespace, RBAC, network policies, target pod, TLS, storage, Kali pod, ingress, in order.
+
 **Verify — do not trust the script's own success banner alone:**
 ```bash
-kubectl get ns student-001 --show-labels
-kubectl get serviceaccount,role,rolebinding -n student-001
-kubectl get networkpolicy -n student-001
+kubectl get ns student-009 --show-labels
+kubectl get serviceaccount,role,rolebinding -n student-009
+kubectl get networkpolicy -n student-009
+kubectl get pods -n student-009
+kubectl get pods -n student-009-target
 ```
-Expect: namespace with `lab=cloudsec` and `pod-security.kubernetes.io/*` labels; one ServiceAccount, one Role, one RoleBinding; two NetworkPolicies (`default-deny-ingress`, `allow-same-namespace`).
+Expect: namespace with `lab=cloudsec` and `pod-security.kubernetes.io/*` labels; ServiceAccount, Role, RoleBinding present; 3 NetworkPolicies; `kali-attacker` and `target-metasploitable` both `Running`.
 
 Repeat for each additional student:
 ```bash
-./scripts/generate-student-lab.sh 002
+bash scripts/generate-student-lab.sh 010
 ```
 
 ---
 
 ## 5. Verify isolation with real evidence
 
-**Deploy test pods:**
-```bash
-kubectl apply -f kubernetes/test-pod.yaml -n student-001
-sed 's/name: kali-test/name: kali-test-b/' kubernetes/test-pod.yaml | kubectl apply -n student-002 -f -
-kubectl get pods -n student-001 -o wide
-kubectl get pods -n student-002 -o wide
-```
-
 **Cross-namespace test (expect deny):**
 ```bash
-kubectl exec -it kali-test -n student-001 -- ping -c 3 <student-002-pod-ip>
+kubectl get pod kali-attacker -n student-010 -o jsonpath='{.status.podIP}'
+kubectl exec -it kali-attacker -n student-009 -- ping -c 3 <student-010-pod-ip>
 ```
 Expect: 100% packet loss.
 
-**Same-namespace test (expect allow) — deploy a second pod in the same namespace first:**
+**Same-namespace test (expect allow):**
 ```bash
-sed 's/name: kali-test/name: kali-test-b/' kubernetes/test-pod.yaml | kubectl apply -n student-001 -f -
-kubectl exec -it kali-test -n student-001 -- ping -c 3 <kali-test-b-same-namespace-ip>
+kubectl exec -it kali-attacker -n student-009 -- ping -c 3 <target-metasploitable-ip-same-student>
 ```
 Expect: 0% packet loss.
 
 **RBAC isolation:**
 ```bash
-kubectl auth can-i create pods --as=system:serviceaccount:student-001:student-001 -n student-001   # expect: yes
-kubectl auth can-i create pods --as=system:serviceaccount:student-001:student-001 -n student-002   # expect: no
+kubectl auth can-i get pods --as=system:serviceaccount:student-009:student-009 -n student-009   # expect: yes
+kubectl auth can-i get pods --as=system:serviceaccount:student-009:student-009 -n student-010   # expect: no
+kubectl auth can-i create configmaps --as=system:serviceaccount:student-009:student-009 -n student-009   # expect: no
 ```
 
 ---
 
-## 6. Known gaps to resolve before treating provisioning as final
+## 6. Ingress, TLS, and WAF (ModSecurity)
 
-- **Backfill NetworkPolicies for any namespace provisioned before the `generate-student-rbac.sh` fix** (affected: `student-004`, `student-005` in this project's history):
-  ```bash
-  kubectl apply -n student-004 -f kubernetes/network-policies/default-deny.yaml
-  kubectl apply -n student-004 -f kubernetes/network-policies/allow-student-internal.yaml
-  kubectl get networkpolicy -A
-  ```
-- **PSA vs. Kali capability conflict is unresolved** — Restricted (and Baseline) PSA both block `NET_RAW`/`NET_ADMIN`, which nmap needs. Current default leaves Kali unable to raw-socket-scan inside Kubernetes. See `docs/session-summary-2026-07-13.md` for the tradeoff and options.
-- **Access tokens print to stdout** — fine for local testing, redirect to a file before using with real students:
-  ```bash
-  kubectl create token student-001 -n student-001 --duration=8h > /tmp/student-001.token
-  ```
-
----
-
-## Full command reference, condensed
-
-```bash
-# Compose layer
-docker compose up -d --build
-
-# Cluster
-kind create cluster --name cloudsec-lab --config kind-config.yaml
-kubectl config use-context kind-cloudsec-lab
-kubectl apply -f calico/calico.yaml
-kubectl wait --for=condition=Ready pods --all -n kube-system --timeout=300s
-
-# Provision students
-./scripts/generate-student-lab.sh 001
-./scripts/generate-student-lab.sh 002
-
-# Verify
-kubectl get networkpolicy -A
-kubectl get roles,rolebindings -A | grep student
-```
----
-
-## 7. Ingress, TLS, and WAF (ModSecurity)
-
-**Install ingress-nginx (kind-specific manifest — community project, officially retired March 2026, used here deliberately since this is an isolated lab, not internet-facing):**
 ```bash
 kubectl apply -f \
   https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
@@ -183,8 +136,8 @@ data:
     SecAuditLogType Serial
 '
 kubectl rollout restart deployment ingress-nginx-controller -n ingress-nginx
+kubectl rollout status deployment ingress-nginx-controller -n ingress-nginx --timeout=120s
 ```
-**Verify:** `kubectl exec -n ingress-nginx deploy/ingress-nginx-controller -- cat /etc/nginx/nginx.conf | grep -i modsecurity` → `modsecurity on;`
 
 **Create lab CA + wildcard cert (once):**
 ```bash
@@ -204,35 +157,31 @@ cp "$WORKDIR/wildcard.crt" ./ca/wildcard.crt
 cp "$WORKDIR/wildcard.key" ./ca/wildcard.key
 rm -rf "$WORKDIR"
 ```
-**Verify:** `openssl x509 -in ./ca/wildcard.crt -noout -subject -issuer -dates`
+TLS + Ingress + WAF are provisioned automatically per student via `generate-student-lab.sh` — no manual per-student cert signing needed.
 
-TLS + Ingress + WAF are provisioned automatically per student via `generate-student-lab.sh` (Steps 5 and 8) — no manual per-student cert signing needed.
-
-**Test TLS + WAF (port-forward required first, see Section 8 below):**
+**Test TLS + WAF:**
 ```bash
-curl -kv --resolve student-011.lab.local:8443:127.0.0.1 https://student-011.lab.local:8443/
-curl -k --resolve student-011.lab.local:8443:127.0.0.1 \
-  --get "https://student-011.lab.local:8443/" --data-urlencode "id=1' OR '1'='1"
+curl -kv --resolve student-009.lab.local:8443:127.0.0.1 https://student-009.lab.local:8443/
+curl -k --resolve student-009.lab.local:8443:127.0.0.1 \
+  --get "https://student-009.lab.local:8443/" --data-urlencode "id=1' OR '1'='1"
 kubectl logs -n ingress-nginx -l app.kubernetes.io/component=controller --tail=50 | grep -i "SQL Injection"
 ```
-**Verify:** TLS handshake succeeds with `CN=student-011.lab.local`; SQLi payload returns 200 (detection-only) but the CRS rule `942100` fires in the audit log.
+**Verify:** TLS handshake succeeds; SQLi payload returns 200 (detection-only), CRS rule `942100` fires in audit log.
 
 ---
 
-## 8. Ingress port-forward (session-persistent helper)
+## 7. Ingress port-forward
 
 ```bash
 ./scripts/lab-portforward.sh start
 ./scripts/lab-portforward.sh status
-./scripts/lab-portforward.sh stop
 ```
-This is called automatically at the end of `generate-student-lab.sh`, so it's usually already running after provisioning.
+Auto-invoked at the end of `generate-student-lab.sh`.
 
 ---
 
-## 9. Encrypted persistent storage
+## 8. Encrypted persistent storage
 
-**One-time: create the LUKS-encrypted volume inside the kind node:**
 ```bash
 docker exec cloudsec-lab-control-plane bash -c "
 apt-get update -qq && apt-get install -y -qq cryptsetup >/dev/null
@@ -246,7 +195,7 @@ mkfs.ext4 /dev/mapper/student-storage
 mount /dev/mapper/student-storage /mnt/encrypted-storage
 "
 ```
-**Verify:** `docker exec cloudsec-lab-control-plane bash -c "mount | grep student-storage; lsblk"` → shows `crypt` type over `loop0`.
+**Verify:** `docker exec cloudsec-lab-control-plane lsblk` → `crypt` type over `loop0`.
 
 **Point local-path-provisioner at it:**
 ```bash
@@ -257,207 +206,203 @@ data:
 '
 kubectl rollout restart deployment local-path-provisioner -n local-path-storage
 ```
-Every student's `student-XXX-work` PVC (created automatically in Step 7 of `generate-student-lab.sh`) now lands on this encrypted volume.
 
-**Important caveat:** this LUKS volume must be manually unlocked (`cryptsetup luksOpen`, passphrase required) after any kind-node restart — it does not auto-remount.
+**Known gap — data does not survive a cluster rebuild:** the encrypted volume and all snapshots live inside the kind node's Docker-managed filesystem with no host bind-mount. `kind delete cluster` destroys all of it. No script automates preservation; do this manually before any rebuild:
+```bash
+docker cp cloudsec-lab-control-plane:/mnt/encrypted-storage-snapshots/. ./_preserved-node-data/encrypted-storage-snapshots/
+docker cp cloudsec-lab-control-plane:/mnt/encrypted-storage/. ./_preserved-node-data/encrypted-storage/
+```
 
 ---
 
-## 10. Automated backup
+## 9. Automated backup
 
 ```bash
-docker exec cloudsec-lab-control-plane mkdir -p /mnt/encrypted-storage-backups
+bash scripts/backup-student-lab.sh student-009
+```
+Creates `backups/student-009-<timestamp>/` with manifests and `work-data.tar`.
 
-cat <<EOF | kubectl apply -f -
-apiVersion: batch/v1
-kind: CronJob
-metadata:
-  name: student-data-backup
-  namespace: kube-system
-spec:
-  schedule: "0 2 * * *"
-  jobTemplate:
-    spec:
-      template:
-        spec:
-          restartPolicy: OnFailure
-          containers:
-          - name: backup
-            image: busybox
-            command:
-            - sh
-            - -c
-            - |
-              TS=\$(date +%Y%m%d-%H%M%S)
-              tar czf /backups/student-data-\${TS}.tar.gz -C /source .
-              find /backups -name "student-data-*.tar.gz" -mtime +7 -delete
-            volumeMounts:
-            - name: source
-              mountPath: /source
-              readOnly: true
-            - name: backups
-              mountPath: /backups
-          volumes:
-          - name: source
-            hostPath:
-              path: /mnt/encrypted-storage
-          - name: backups
-            hostPath:
-              path: /mnt/encrypted-storage-backups
-EOF
-```
-**Verify (manual trigger, don't wait for 2am):**
+**Verify:**
 ```bash
-kubectl create job --from=cronjob/student-data-backup manual-backup-test -n kube-system
-kubectl wait --for=condition=complete job/manual-backup-test -n kube-system --timeout=60s
-docker exec cloudsec-lab-control-plane ls -lh /mnt/encrypted-storage-backups
+LATEST=$(ls -td backups/student-009-* | head -1)
+tar -tvf "$LATEST/work-data.tar"
 ```
-**Known gap:** backups live on the same encrypted disk as source data — violates 3-2-1 backup principle. Not yet copied off-disk.
+
+---
+
+## 10. Disaster recovery
+
+```bash
+LATEST=$(ls -td backups/student-009-* | head -1)
+bash scripts/disaster-recovery.sh student-009 "$LATEST"
+echo "DR exit code: $?"
+```
+Auto-backs up, deletes both namespaces, redeploys via `generate-student-lab.sh`, restores workspace from the given backup.
+
+**Verify:**
+```bash
+kubectl exec -n student-009 kali-attacker -- cat /home/kali/workspace/<restored-file>
+```
+Exit code must be `0` and file content must match — do not trust script output alone.
 
 ---
 
 ## 11. Falco (compromise detection)
 
 ```bash
-brew install helm
-helm repo add falcosecurity https://falcosecurity.github.io/charts
-helm repo update
-helm install falco falcosecurity/falco \
-  --namespace falco --create-namespace \
-  --set driver.kind=modern_ebpf \
-  --set tty=true
+bash scripts/install-falco.sh
 ```
-**Verify:** `kubectl get pods -n falco` → `1/2` or `2/2 Running`, no `CrashLoopBackOff`. **Always confirm `kubectl config current-context` is `kind-cloudsec-lab` first** — this project has hit the wrong-cluster bug twice.
+Wraps `helm upgrade --install falco falcosecurity/falco --namespace falco --values monitoring/falco/values.yaml`.
 
-**Custom rules (scoped to lab-specific compromise signals, not stock "shell spawned" noise):**
+**Verify context first — always:**
 ```bash
-cat > /tmp/falco-custom-rules.yaml << 'EOF'
-customRules:
-  lab-rules.yaml: |-
-    - macro: kali_namespace
-      condition: k8s.ns.name startswith "student-" and not k8s.ns.name endswith "-target"
-    - macro: target_namespace
-      condition: k8s.ns.name endswith "-target"
-    - rule: Lab Container Breakout Attempt
-      desc: Process attempted to access host filesystem or container runtime socket from within a lab pod
-      condition: >
-        evt.type in (open, openat, openat2) and
-        (kali_namespace or target_namespace) and
-        (fd.name startswith /var/run/docker.sock or
-         fd.name startswith /var/run/containerd or
-         fd.name startswith /proc/1/root or
-         fd.name startswith /host)
-      output: "Possible container breakout in lab pod (user=%user.name command=%proc.cmdline container=%container.name ns=%k8s.ns.name file=%fd.name)"
-      priority: CRITICAL
-      tags: [lab, breakout]
-    - rule: Unexpected Outbound Connection From Target
-      desc: Metasploitable target pod initiated an outbound connection
-      condition: >
-        evt.type = connect and
-        target_namespace and
-        outbound and
-        not fd.sip in (allowed_target_egress_ips)
-      output: "Target pod made outbound connection (container=%container.name ns=%k8s.ns.name dest=%fd.rip:%fd.rport)"
-      priority: WARNING
-      tags: [lab, target-egress]
-    - list: allowed_target_egress_ips
-      items: []
-    - rule: Unexpected Privilege Escalation In Target
-      desc: A process gained root/setuid in the target namespace outside the pod's own defined entrypoint
-      condition: >
-        evt.type = execve and
-        target_namespace and
-        proc.is_exe_upper_layer=true and
-        proc.vpid != 1
-      output: "Unexpected privileged exec in target (user=%user.name cmdline=%proc.cmdline container=%container.name)"
-      priority: WARNING
-      tags: [lab, privesc]
-EOF
-helm upgrade falco falcosecurity/falco --namespace falco --reuse-values -f /tmp/falco-custom-rules.yaml
+kubectl config current-context
 ```
-**Verify no errors (not just warnings):**
+
+**Verify rules actually deployed match the repo (Helm releases can drift):**
 ```bash
-kubectl rollout status daemonset/falco -n falco
-kubectl logs -n falco -l app.kubernetes.io/name=falco --tail=50 | grep -i "error\|invalid"
+kubectl exec -n falco $(kubectl get pod -n falco -l app.kubernetes.io/name=falco -o jsonpath='{.items[0].metadata.name}') -c falco -- cat /etc/falco/rules.d/cyber-lab.yaml
+```
+Expect three rules: `Cyber Lab Suspicious Activity` (WARNING), `Cyber Lab Read Shadow` (WARNING), `Lab Container Breakout Attempt` (CRITICAL). If the live pod's rules don't match `monitoring/falco/values.yaml`, re-run `install-falco.sh` — the release has drifted and needs re-syncing.
+
+**Trigger and confirm alerts fire:**
+```bash
+bash scripts/demo-falco-alert.sh 009
+kubectl logs -n falco -l app.kubernetes.io/name=falco -c falco --tail=50 | grep -i cyberlab
 ```
 
-**Note `evt.dir` is deprecated** — do not add `evt.dir = <` / `evt.dir = >` to any condition; it causes a hard compile error and crash loop on current Falco versions.
-
-**Known bug:** "Lab Container Breakout Attempt" does not currently fire despite confirmed-successful `/proc/1/root` reads. Unresolved. "Unexpected Outbound Connection From Target" is proven working.
+**Note:** `evt.dir` is deprecated — do not use `evt.dir = <` / `evt.dir = >` in any condition; causes a hard compile error and crash loop.
 
 ---
 
-## 12. Snapshot management & clean environment deployment
+## 12. Automated recovery on compromise
 
-**One-time: snapshot/golden directories:**
 ```bash
-docker exec cloudsec-lab-control-plane mkdir -p /mnt/encrypted-storage-snapshots
-docker exec cloudsec-lab-control-plane mkdir -p /mnt/encrypted-storage-golden
+bash scripts/falco-auto-responder.sh
+```
+Dry-run by default — watches Falco logs, prints what it would do on a CRITICAL alert. Add `--live` to actually trigger `disaster-recovery.sh` automatically.
+
+```bash
+bash scripts/falco-auto-responder.sh --live
 ```
 
-**On-demand snapshot of a student's workspace:**
+**Trigger a real CRITICAL alert to test (in a second terminal):**
 ```bash
-./scripts/snapshot-student.sh <student-id>
+kubectl -n student-009 exec kali-attacker -- sh -c 'cat /proc/1/root/etc/hostname 2>&1'
 ```
+**Verify:** responder terminal shows the CRITICAL alert detected and DR triggered; check `logs/auto-dr-student-009-*.log` for the full DR transcript; confirm pod healthy afterward with `kubectl get pods -n student-009`.
 
-**Restore a specific snapshot:**
-```bash
-./scripts/restore-student-snapshot.sh <student-id> <snapshot-filename>.tar.gz
-```
+---
 
-**Build/update the golden (clean starter) snapshot — must be built with macOS tar artifacts excluded:**
+## 13. Snapshot management & clean environment deployment
+
 ```bash
-WORKDIR=$(mktemp -d)
-cat > "$WORKDIR/.golden-info" << EOF
-golden_snapshot=true
-created=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-description=Clean starter workspace, no scan output or student files
-EOF
-chmod 0777 "$WORKDIR"
-COPYFILE_DISABLE=1 tar czf /tmp/golden-workspace.tar.gz --exclude='.' --exclude='._*' -C "$WORKDIR" .golden-info
-docker cp /tmp/golden-workspace.tar.gz cloudsec-lab-control-plane:/mnt/encrypted-storage-golden/golden-workspace.tar.gz
-rm -rf "$WORKDIR"
+bash scripts/snapshot-student.sh 009
+bash scripts/restore-student-snapshot.sh 009 <snapshot-filename>.tar.gz
 ```
 
 **Quick deployment of a clean environment (new student):**
 ```bash
-./scripts/generate-student-lab.sh <student-id>
-./scripts/load-golden-snapshot.sh <student-id>
+bash scripts/generate-student-lab.sh <student-id>
+bash scripts/load-golden-snapshot.sh <student-id>
 ```
 
-**Full clean redeploy of an existing (possibly compromised) student — destroys and rebuilds both namespaces, requires typed confirmation:**
+**Full clean redeploy of an existing student (destroys and rebuilds both namespaces, requires typed confirmation):**
 ```bash
-./scripts/redeploy-clean-student.sh <student-id>
+bash scripts/redeploy-clean-student.sh <student-id>
 ```
 
-**Check environment status, including whether golden was loaded:**
+**Check status:**
 ```bash
-./scripts/show-student-env.sh <student-id>
+bash scripts/show-student-env.sh <student-id>
 ```
 
-**Known permissions gotcha:** `local-path-provisioner`'s `setup` script creates new PVC directories as `0777`, but any directory created before the encrypted-storage path patch may be stuck at `0755` (root-only write). If a student can't write to their workspace, check with:
-```bash
-docker exec cloudsec-lab-control-plane ls -la /mnt/encrypted-storage/ | grep student-XXX
-```
-and `chmod 0777` the specific directory if needed.
 ---
 
-## 13. Known gap: storage durability does not survive cluster rebuild (found 2026-07-19)
+## 14. Autoscaling and pod anti-affinity
 
-The LUKS-encrypted volume (`/mnt/encrypted-storage`) and all snapshot files
-(`/mnt/encrypted-storage-snapshots`) live entirely inside the kind node's
-Docker-managed volume — there is no host bind-mount backing them. A
-`kind delete cluster` (needed for any node-config change, e.g. the
-single-node→multi-node rebuild done this session) **permanently destroys
-all of it** unless manually copied off first:
-
+**Install metrics-server (required for HPA):**
 ```bash
-docker cp cloudsec-lab-control-plane:/mnt/encrypted-storage-snapshots/. ./_preserved-node-data/encrypted-storage-snapshots/
-docker cp cloudsec-lab-control-plane:/mnt/encrypted-storage/. ./_preserved-node-data/encrypted-storage/
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+kubectl patch deployment metrics-server -n kube-system --type='json' \
+  -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+kubectl top nodes
 ```
 
-**No script in this repo does this automatically today.** This is a real
-gap in the "automated backup" and "encrypted persistent storage"
-deliverables — encryption-at-rest is genuine, but durability across cluster
-lifecycle events is not, and should not be presented as equivalent to true
-off-node backup.
+**HPA on the ingress controller — not student pods (student pods are non-scalable, stateful Pod objects, not Deployments):**
+```bash
+cat <<EOF | kubectl apply -f -
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ingress-nginx-controller-hpa
+  namespace: ingress-nginx
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ingress-nginx-controller
+  minReplicas: 1
+  maxReplicas: 2
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 30
+EOF
+```
+`maxReplicas: 2` matches node count — kind's ingress-nginx manifest binds `hostPort`, so only one replica can schedule per node. Do not set this higher without more nodes.
+
+**Pod anti-affinity (soft):**
+```bash
+kubectl patch deployment ingress-nginx-controller -n ingress-nginx --type=strategic -p '
+spec:
+  template:
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/component: controller
+              topologyKey: kubernetes.io/hostname
+'
+```
+
+**Verify with real load:**
+```bash
+kubectl -n student-009 exec kali-attacker -- sh -c 'for i in $(seq 1 2000); do curl -sk --resolve student-009.lab.local:8443:127.0.0.1 https://student-009.lab.local:8443/ -o /dev/null & done; wait' &
+kubectl get hpa -n ingress-nginx -w
+```
+Expect replicas to scale 1 → 2 under load. Then confirm distribution:
+```bash
+kubectl get pods -n ingress-nginx -o wide
+```
+Expect the two replicas on different `NODE` values.
+
+---
+
+## 15. Monitoring (Prometheus/Grafana) — known limitation
+
+Full `kube-prometheus-stack` was attempted and reverted. It repeatedly overloaded the control plane on a single-Mac Docker Desktop setup already running Calico, Falco (both nodes), ingress-nginx, and metrics-server — caused sustained `TLS handshake timeout` errors and required a control-plane container restart to recover:
+```bash
+docker restart cloudsec-lab-control-plane
+```
+If pursued further, use a trimmed install (disable Alertmanager, cap resource requests) rather than the full default chart:
+```bash
+helm install monitoring prometheus-community/kube-prometheus-stack \
+  --namespace monitoring \
+  --set alertmanager.enabled=false \
+  --set prometheus.prometheusSpec.resources.requests.cpu=100m \
+  --set prometheus.prometheusSpec.resources.requests.memory=256Mi \
+  --set grafana.resources.requests.cpu=50m \
+  --set grafana.resources.requests.memory=128Mi
+```
+
+---
+
+```
